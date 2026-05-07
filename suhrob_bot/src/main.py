@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 import structlog
 from aiogram import Bot, Dispatcher
@@ -40,6 +41,24 @@ from src.bot.handlers.developer.settings import router as dev_settings_router
 from src.bot.handlers.developer.companies import router as dev_companies_router
 
 from src.scheduler.setup import setup_scheduler
+
+
+def run_migrations() -> None:
+    """Run alembic upgrade head before the event loop starts."""
+    try:
+        from alembic.config import Config
+        from alembic import command as alembic_command
+
+        ini_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini")
+        if not os.path.exists(ini_path):
+            logging.warning("alembic.ini not found at %s — skipping auto-migration", ini_path)
+            return
+        cfg = Config(ini_path)
+        alembic_command.upgrade(cfg, "head")
+        logging.info("alembic upgrade head: OK")
+    except Exception as exc:
+        logging.error("alembic upgrade head failed: %s", exc)
+        raise
 
 
 def setup_logging():
@@ -167,4 +186,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    run_migrations()
     asyncio.run(main())

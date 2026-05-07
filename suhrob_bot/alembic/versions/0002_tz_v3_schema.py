@@ -16,11 +16,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def _create_enum(name: str, *values: str) -> None:
     vals = ", ".join(f"'{v}'" for v in values)
-    op.execute(sa.text(f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); EXCEPTION WHEN duplicate_object THEN NULL; END $$"))
+    op.execute(sa.text(
+        f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); "
+        f"EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+    ))
 
 
 def upgrade() -> None:
-    # ── New enums (idempotent via DO block) ──────────────────────────
+    # ── New enums (idempotent) ───────────────────────────────────────
     _create_enum("subscriptiontype", "base", "instagram")
     _create_enum("paymentsource", "balance", "manual_proof")
     _create_enum("transactiontype", "topup", "subscription_charge", "instagram_charge", "refund")
@@ -28,218 +31,265 @@ def upgrade() -> None:
     _create_enum("postplatform", "telegram", "instagram")
     _create_enum("leadstatus", "new", "contacted", "showing_scheduled", "negotiation", "closed_won", "closed_lost")
 
-    # Add "draft" to existing propertystatus enum (PostgreSQL ALTER TYPE)
-    op.execute("ALTER TYPE propertystatus ADD VALUE IF NOT EXISTS 'draft'")
+    op.execute(sa.text("ALTER TYPE propertystatus ADD VALUE IF NOT EXISTS 'draft'"))
+    op.execute(sa.text("ALTER TYPE paymentmethod ADD VALUE IF NOT EXISTS 'balance'"))
 
-    # Add "balance" to existing paymentmethod enum
-    op.execute("ALTER TYPE paymentmethod ADD VALUE IF NOT EXISTS 'balance'")
+    # ── companies ───────────────────────────────────────────────────
+    op.execute(sa.text("""
+        ALTER TABLE companies
+            ADD COLUMN IF NOT EXISTS bot_token          VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS bot_username       VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS bot_id             BIGINT,
+            ADD COLUMN IF NOT EXISTS instagram_username VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS instagram_connected BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS trial_ends_at      TIMESTAMPTZ
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_companies_bot_token'
+                           AND conrelid = 'companies'::regclass) THEN
+                ALTER TABLE companies ADD CONSTRAINT uq_companies_bot_token UNIQUE (bot_token);
+            END IF;
+        END $$
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_companies_bot_username'
+                           AND conrelid = 'companies'::regclass) THEN
+                ALTER TABLE companies ADD CONSTRAINT uq_companies_bot_username UNIQUE (bot_username);
+            END IF;
+        END $$
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_companies_bot_id'
+                           AND conrelid = 'companies'::regclass) THEN
+                ALTER TABLE companies ADD CONSTRAINT uq_companies_bot_id UNIQUE (bot_id);
+            END IF;
+        END $$
+    """))
 
-    # ── Alter companies ──────────────────────────────────────────────
-    op.add_column("companies", sa.Column("bot_token", sa.String(255), nullable=True))
-    op.add_column("companies", sa.Column("bot_username", sa.String(64), nullable=True))
-    op.add_column("companies", sa.Column("bot_id", sa.BigInteger(), nullable=True))
-    op.add_column("companies", sa.Column("instagram_username", sa.String(64), nullable=True))
-    op.add_column("companies", sa.Column("instagram_connected", sa.Boolean(), nullable=False, server_default=sa.text("false")))
-    op.add_column("companies", sa.Column("trial_ends_at", sa.DateTime(timezone=True), nullable=True))
-    op.create_unique_constraint("uq_companies_bot_token", "companies", ["bot_token"])
-    op.create_unique_constraint("uq_companies_bot_username", "companies", ["bot_username"])
-    op.create_unique_constraint("uq_companies_bot_id", "companies", ["bot_id"])
-
-    # ── Alter users ──────────────────────────────────────────────────
-    op.create_index("ix_users_company_role", "users", ["company_id", "role"])
-
-    # ── Alter properties ─────────────────────────────────────────────
-    op.add_column("properties", sa.Column("description_edited", sa.Boolean(), nullable=False, server_default=sa.text("false")))
-    op.add_column("properties", sa.Column("location_lat", sa.Numeric(10, 7), nullable=True))
-    op.add_column("properties", sa.Column("location_lng", sa.Numeric(10, 7), nullable=True))
-    op.add_column("properties", sa.Column("features", sa.JSON(), nullable=True))
-    op.add_column("properties", sa.Column("instagram_post_id", sa.String(100), nullable=True))
-    op.add_column("properties", sa.Column("views_count", sa.Integer(), nullable=False, server_default=sa.text("0")))
-    op.add_column("properties", sa.Column("contacts_count", sa.Integer(), nullable=False, server_default=sa.text("0")))
-
-    # ── Alter property_media ─────────────────────────────────────────
-    op.add_column("property_media", sa.Column("is_main", sa.Boolean(), nullable=False, server_default=sa.text("false")))
-    op.add_column("property_media", sa.Column("ai_quality_score", sa.Numeric(3, 1), nullable=True))
-
-    # ── Alter subscriptions ──────────────────────────────────────────
-    op.add_column("subscriptions", sa.Column(
-        "subscription_type",
-        sa.Enum("base", "instagram", name="subscriptiontype", create_type=False),
-        nullable=False, server_default=sa.text("'base'")
-    ))
-    op.add_column("subscriptions", sa.Column(
-        "payment_source",
-        sa.Enum("balance", "manual_proof", name="paymentsource", create_type=False),
-        nullable=True
-    ))
-    op.add_column("subscriptions", sa.Column(
-        "auto_renewed", sa.Boolean(), nullable=False, server_default=sa.text("false")
+    # ── users ────────────────────────────────────────────────────────
+    op.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_users_company_role ON users (company_id, role)"
     ))
 
-    # ── Alter scheduled_posts ────────────────────────────────────────
-    op.add_column("scheduled_posts", sa.Column(
-        "platform",
-        sa.Enum("telegram", "instagram", name="postplatform", create_type=False),
-        nullable=False, server_default=sa.text("'telegram'")
+    # ── properties ──────────────────────────────────────────────────
+    op.execute(sa.text("""
+        ALTER TABLE properties
+            ADD COLUMN IF NOT EXISTS description_edited BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS location_lat       NUMERIC(10, 7),
+            ADD COLUMN IF NOT EXISTS location_lng       NUMERIC(10, 7),
+            ADD COLUMN IF NOT EXISTS features           JSON,
+            ADD COLUMN IF NOT EXISTS instagram_post_id  VARCHAR(100),
+            ADD COLUMN IF NOT EXISTS views_count        INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS contacts_count     INTEGER NOT NULL DEFAULT 0
+    """))
+
+    # ── property_media ───────────────────────────────────────────────
+    op.execute(sa.text("""
+        ALTER TABLE property_media
+            ADD COLUMN IF NOT EXISTS is_main          BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS ai_quality_score NUMERIC(3, 1)
+    """))
+
+    # ── subscriptions ────────────────────────────────────────────────
+    op.execute(sa.text("""
+        ALTER TABLE subscriptions
+            ADD COLUMN IF NOT EXISTS subscription_type subscriptiontype NOT NULL DEFAULT 'base',
+            ADD COLUMN IF NOT EXISTS payment_source    paymentsource,
+            ADD COLUMN IF NOT EXISTS auto_renewed      BOOLEAN NOT NULL DEFAULT false
+    """))
+
+    # ── scheduled_posts ──────────────────────────────────────────────
+    op.execute(sa.text("""
+        ALTER TABLE scheduled_posts
+            ADD COLUMN IF NOT EXISTS platform   postplatform NOT NULL DEFAULT 'telegram',
+            ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+    """))
+    op.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_scheduled_posts_status_at ON scheduled_posts (status, scheduled_at)"
     ))
-    op.add_column("scheduled_posts", sa.Column(
-        "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+
+    # ── notifications_log ────────────────────────────────────────────
+    op.execute(sa.text("""
+        ALTER TABLE notifications_log
+            ADD COLUMN IF NOT EXISTS related_property_id INTEGER REFERENCES properties(id),
+            ADD COLUMN IF NOT EXISTS message_text        TEXT
+    """))
+    # Convert notification_type from enum to varchar — idempotent (check data_type first)
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'notifications_log'
+                  AND column_name = 'notification_type'
+                  AND data_type = 'USER-DEFINED'
+            ) THEN
+                ALTER TABLE notifications_log
+                    ALTER COLUMN notification_type TYPE VARCHAR(50)
+                    USING notification_type::text;
+            END IF;
+        END $$
+    """))
+
+    # ── New tables (CREATE ... IF NOT EXISTS) ─────────────────────────
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS user_balances (
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL UNIQUE REFERENCES users(id),
+            balance_usd NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+            balance_uzs NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+            updated_at  TIMESTAMPTZ    NOT NULL DEFAULT now()
+        )
+    """))
+
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS balance_transactions (
+            id                       SERIAL PRIMARY KEY,
+            user_id                  INTEGER NOT NULL REFERENCES users(id),
+            amount_usd               NUMERIC(10, 2),
+            amount_uzs               NUMERIC(15, 2),
+            transaction_type         transactiontype NOT NULL,
+            payment_method           paymentmethod,
+            description              TEXT,
+            related_subscription_id  INTEGER REFERENCES subscriptions(id),
+            status                   transactionstatus NOT NULL DEFAULT 'pending',
+            payment_proof_file_id    VARCHAR(500),
+            created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """))
+    op.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_balance_transactions_user_created "
+        "ON balance_transactions (user_id, created_at)"
     ))
-    op.create_index("ix_scheduled_posts_status_at", "scheduled_posts", ["status", "scheduled_at"])
 
-    # ── Alter notifications_log ──────────────────────────────────────
-    op.add_column("notifications_log", sa.Column("related_property_id", sa.Integer(), sa.ForeignKey("properties.id"), nullable=True))
-    op.add_column("notifications_log", sa.Column("message_text", sa.Text(), nullable=True))
-    # Change notification_type to String to support more types without enum migrations
-    # postgresql_using is required because PostgreSQL cannot auto-cast ENUM → varchar
-    op.alter_column(
-        "notifications_log", "notification_type",
-        type_=sa.String(50),
-        existing_type=sa.Enum(
-            "payment_reminder_3days", "payment_due", "blocked", "payment_received",
-            name="notificationtype",
-        ),
-        existing_nullable=False,
-        postgresql_using="notification_type::text",
-    )
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS client_profiles (
+            id                  SERIAL PRIMARY KEY,
+            user_id             INTEGER NOT NULL UNIQUE REFERENCES users(id),
+            budget_min_usd      NUMERIC(10, 2),
+            budget_max_usd      NUMERIC(10, 2),
+            preferred_districts JSON,
+            preferred_rooms     JSON,
+            property_type       VARCHAR(20),
+            purchase_timeline   VARCHAR(30),
+            payment_method      VARCHAR(30),
+            qualification_score INTEGER     NOT NULL DEFAULT 0,
+            qualified_at        TIMESTAMPTZ,
+            notes               TEXT,
+            last_contact_at     TIMESTAMPTZ,
+            follow_up_count     INTEGER     NOT NULL DEFAULT 0,
+            unsubscribed        BOOLEAN     NOT NULL DEFAULT false,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """))
 
-    # ── New tables ───────────────────────────────────────────────────
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS client_conversations (
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            property_id INTEGER REFERENCES properties(id),
+            role        VARCHAR(10) NOT NULL,
+            message     TEXT        NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """))
+    op.execute(sa.text(
+        "CREATE INDEX IF NOT EXISTS ix_client_conversations_user_created "
+        "ON client_conversations (user_id, created_at)"
+    ))
 
-    op.create_table(
-        "user_balances",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), unique=True, nullable=False),
-        sa.Column("balance_usd", sa.Numeric(10, 2), nullable=False, server_default=sa.text("0.00")),
-        sa.Column("balance_uzs", sa.Numeric(15, 2), nullable=False, server_default=sa.text("0.00")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS client_alerts (
+            id               SERIAL PRIMARY KEY,
+            user_id          INTEGER NOT NULL REFERENCES users(id),
+            location_district VARCHAR(100),
+            price_max_usd    NUMERIC(10, 2),
+            rooms            INTEGER,
+            property_type    VARCHAR(20),
+            is_active        BOOLEAN     NOT NULL DEFAULT true,
+            last_notified_at TIMESTAMPTZ,
+            created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """))
 
-    op.create_table(
-        "balance_transactions",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("amount_usd", sa.Numeric(10, 2), nullable=True),
-        sa.Column("amount_uzs", sa.Numeric(15, 2), nullable=True),
-        sa.Column("transaction_type", sa.Enum(
-            "topup", "subscription_charge", "instagram_charge", "refund",
-            name="transactiontype", create_type=False
-        ), nullable=False),
-        sa.Column("payment_method", sa.Enum(
-            "click", "humo", "uzcard", "crypto", "balance",
-            name="paymentmethod", create_type=False
-        ), nullable=True),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("related_subscription_id", sa.Integer(), sa.ForeignKey("subscriptions.id"), nullable=True),
-        sa.Column("status", sa.Enum(
-            "pending", "completed", "failed",
-            name="transactionstatus", create_type=False
-        ), nullable=False, server_default=sa.text("'pending'")),
-        sa.Column("payment_proof_file_id", sa.String(500), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
-    op.create_index("ix_balance_transactions_user_created", "balance_transactions", ["user_id", "created_at"])
-
-    op.create_table(
-        "client_profiles",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), unique=True, nullable=False),
-        sa.Column("budget_min_usd", sa.Numeric(10, 2), nullable=True),
-        sa.Column("budget_max_usd", sa.Numeric(10, 2), nullable=True),
-        sa.Column("preferred_districts", sa.JSON(), nullable=True),
-        sa.Column("preferred_rooms", sa.JSON(), nullable=True),
-        sa.Column("property_type", sa.String(20), nullable=True),
-        sa.Column("purchase_timeline", sa.String(30), nullable=True),
-        sa.Column("payment_method", sa.String(30), nullable=True),
-        sa.Column("qualification_score", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("qualified_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("last_contact_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("follow_up_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("unsubscribed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
-
-    op.create_table(
-        "client_conversations",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("property_id", sa.Integer(), sa.ForeignKey("properties.id"), nullable=True),
-        sa.Column("role", sa.String(10), nullable=False),
-        sa.Column("message", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
-    op.create_index("ix_client_conversations_user_created", "client_conversations", ["user_id", "created_at"])
-
-    op.create_table(
-        "client_alerts",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("location_district", sa.String(100), nullable=True),
-        sa.Column("price_max_usd", sa.Numeric(10, 2), nullable=True),
-        sa.Column("rooms", sa.Integer(), nullable=True),
-        sa.Column("property_type", sa.String(20), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
-        sa.Column("last_notified_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
-
-    op.create_table(
-        "lead_assignments",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("client_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("agent_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("property_id", sa.Integer(), sa.ForeignKey("properties.id"), nullable=True),
-        sa.Column("status", sa.Enum(
-            "new", "contacted", "showing_scheduled", "negotiation",
-            "closed_won", "closed_lost",
-            name="leadstatus", create_type=False
-        ), nullable=False, server_default=sa.text("'new'")),
-        sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-    )
+    op.execute(sa.text("""
+        CREATE TABLE IF NOT EXISTS lead_assignments (
+            id             SERIAL PRIMARY KEY,
+            client_user_id INTEGER     NOT NULL REFERENCES users(id),
+            agent_user_id  INTEGER     NOT NULL REFERENCES users(id),
+            property_id    INTEGER     REFERENCES properties(id),
+            status         leadstatus  NOT NULL DEFAULT 'new',
+            notes          TEXT,
+            created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """))
 
 
 def downgrade() -> None:
-    op.drop_table("lead_assignments")
-    op.drop_table("client_alerts")
-    op.drop_table("client_conversations")
-    op.drop_table("client_profiles")
-    op.drop_index("ix_balance_transactions_user_created", "balance_transactions")
-    op.drop_table("balance_transactions")
-    op.drop_table("user_balances")
+    op.execute(sa.text("DROP TABLE IF EXISTS lead_assignments"))
+    op.execute(sa.text("DROP TABLE IF EXISTS client_alerts"))
+    op.execute(sa.text("DROP TABLE IF EXISTS client_conversations"))
+    op.execute(sa.text("DROP TABLE IF EXISTS client_profiles"))
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_balance_transactions_user_created"))
+    op.execute(sa.text("DROP TABLE IF EXISTS balance_transactions"))
+    op.execute(sa.text("DROP TABLE IF EXISTS user_balances"))
 
-    op.drop_index("ix_scheduled_posts_status_at", "scheduled_posts")
-    op.drop_column("scheduled_posts", "created_at")
-    op.drop_column("scheduled_posts", "platform")
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_scheduled_posts_status_at"))
+    op.execute(sa.text("ALTER TABLE scheduled_posts DROP COLUMN IF EXISTS created_at"))
+    op.execute(sa.text("ALTER TABLE scheduled_posts DROP COLUMN IF EXISTS platform"))
 
-    op.drop_column("subscriptions", "auto_renewed")
-    op.drop_column("subscriptions", "payment_source")
-    op.drop_column("subscriptions", "subscription_type")
+    op.execute(sa.text("ALTER TABLE subscriptions DROP COLUMN IF EXISTS auto_renewed"))
+    op.execute(sa.text("ALTER TABLE subscriptions DROP COLUMN IF EXISTS payment_source"))
+    op.execute(sa.text("ALTER TABLE subscriptions DROP COLUMN IF EXISTS subscription_type"))
 
-    op.drop_column("property_media", "ai_quality_score")
-    op.drop_column("property_media", "is_main")
+    op.execute(sa.text("ALTER TABLE property_media DROP COLUMN IF EXISTS ai_quality_score"))
+    op.execute(sa.text("ALTER TABLE property_media DROP COLUMN IF EXISTS is_main"))
 
-    op.drop_column("properties", "contacts_count")
-    op.drop_column("properties", "views_count")
-    op.drop_column("properties", "instagram_post_id")
-    op.drop_column("properties", "features")
-    op.drop_column("properties", "location_lng")
-    op.drop_column("properties", "location_lat")
-    op.drop_column("properties", "description_edited")
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS contacts_count"))
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS views_count"))
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS instagram_post_id"))
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS features"))
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS location_lng"))
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS location_lat"))
+    op.execute(sa.text("ALTER TABLE properties DROP COLUMN IF EXISTS description_edited"))
 
-    op.drop_index("ix_users_company_role", "users")
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_users_company_role"))
 
-    op.drop_constraint("uq_companies_bot_id", "companies")
-    op.drop_constraint("uq_companies_bot_username", "companies")
-    op.drop_constraint("uq_companies_bot_token", "companies")
-    op.drop_column("companies", "trial_ends_at")
-    op.drop_column("companies", "instagram_connected")
-    op.drop_column("companies", "instagram_username")
-    op.drop_column("companies", "bot_id")
-    op.drop_column("companies", "bot_username")
-    op.drop_column("companies", "bot_token")
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_companies_bot_id'
+                       AND conrelid = 'companies'::regclass) THEN
+                ALTER TABLE companies DROP CONSTRAINT uq_companies_bot_id;
+            END IF;
+        END $$
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_companies_bot_username'
+                       AND conrelid = 'companies'::regclass) THEN
+                ALTER TABLE companies DROP CONSTRAINT uq_companies_bot_username;
+            END IF;
+        END $$
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_companies_bot_token'
+                       AND conrelid = 'companies'::regclass) THEN
+                ALTER TABLE companies DROP CONSTRAINT uq_companies_bot_token;
+            END IF;
+        END $$
+    """))
+    op.execute(sa.text("ALTER TABLE companies DROP COLUMN IF EXISTS trial_ends_at"))
+    op.execute(sa.text("ALTER TABLE companies DROP COLUMN IF EXISTS instagram_connected"))
+    op.execute(sa.text("ALTER TABLE companies DROP COLUMN IF EXISTS instagram_username"))
+    op.execute(sa.text("ALTER TABLE companies DROP COLUMN IF EXISTS bot_id"))
+    op.execute(sa.text("ALTER TABLE companies DROP COLUMN IF EXISTS bot_username"))
+    op.execute(sa.text("ALTER TABLE companies DROP COLUMN IF EXISTS bot_token"))
 
-    for name in ("leadstatus", "postplatform", "transactionstatus", "transactiontype", "paymentsource", "subscriptiontype"):
-        sa.Enum(name=name).drop(op.get_bind(), checkfirst=True)
+    for name in ("leadstatus", "postplatform", "transactionstatus", "transactiontype",
+                 "paymentsource", "subscriptiontype"):
+        op.execute(sa.text(f"DROP TYPE IF EXISTS {name}"))
