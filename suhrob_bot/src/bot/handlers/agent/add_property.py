@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from aiogram import Router, F, Bot
-from aiogram.filters import Command
+from aiogram.filters import Command, or_f
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
@@ -194,7 +194,7 @@ async def upload_video(message: Message, state: FSMContext):
     await message.answer(f"📹 {len(videos)} ta video qabul qilindi.")
 
 
-@router.message(AddPropertyStates.uploading_videos, Command("done") | Command("skip"))
+@router.message(AddPropertyStates.uploading_videos, or_f(Command("done"), Command("skip")))
 async def videos_done(message: Message, state: FSMContext):
     await _show_preview(message, state)
 
