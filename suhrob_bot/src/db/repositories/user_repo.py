@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -43,15 +43,15 @@ class UserRepository:
         telegram_id: int,
         username: Optional[str] = None,
         full_name: Optional[str] = None,
+        company_id: Optional[int] = None,
     ) -> tuple[User, bool]:
         user = await self.get_by_telegram_id(telegram_id)
         if user:
             return user, False
-        user = await self.create(telegram_id, username, full_name)
+        user = await self.create(telegram_id, username, full_name, company_id=company_id)
         return user, True
 
     async def update_last_active(self, telegram_id: int) -> None:
-        from sqlalchemy import func
         await self.session.execute(
             update(User)
             .where(User.telegram_user_id == telegram_id)
@@ -65,8 +65,21 @@ class UserRepository:
         )
         await self.session.commit()
 
+    async def get_company_users_by_role(self, company_id: int, role: UserRole) -> list[User]:
+        result = await self.session.execute(
+            select(User).where(
+                User.company_id == company_id,
+                User.role == role,
+                User.is_blocked == False,
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_company_users(self, company_id: int) -> list[User]:
         result = await self.session.execute(
-            select(User).where(User.company_id == company_id, User.is_blocked == False)
+            select(User).where(
+                User.company_id == company_id,
+                User.is_blocked == False,
+            )
         )
         return list(result.scalars().all())

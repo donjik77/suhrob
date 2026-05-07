@@ -228,6 +228,34 @@ TEXTS = {
         "new_company_created": "✅ Kompaniya yaratildi!\nNomi: {name}\nID: {id}",
         "set_role_usage": "Foydalanish:\n/set_role <tg_id> <rol> [company_id]\n\nRollar: agent, director, client, developer",
         "set_role_done": "✅ Foydalanuvchi yangilandi\nTG ID: {tg_id}\nRol: {role}",
+        # AI consultation
+        "btn_ai_consult": "🤖 Konsultatsiya",
+        "btn_ask_ai": "🤖 Savol berish (AI)",
+        "ai_consult_intro": (
+            "🤖 <b>AI-konsultant</b>\n\n"
+            "Sizga qanday ko'chmas mulk kerakligi haqida gapirib bering.\n"
+            "Men sizga mos variantlarni topishda yordam beraman.\n\n"
+            "❌ Chiqish uchun /stop yozing."
+        ),
+        "ai_limit_reached": "⚠️ Bugungi AI so'rovlar limitiga yetdingiz. Ertaga urinib ko'ring.",
+        # Mortgage calculator
+        "btn_mortgage": "💰 Ipoteka kalkulyatori",
+        # Client alerts
+        "btn_notify_alert": "🔔 Yangi chiqsa, xabar bering",
+        "alert_subscribed": "🔔 Obuna faollashtirildi! Yangi mos obyekt chiqsa xabar beramiz.",
+        "alert_unsubscribed": "🔕 Barcha bildirishnomalar o'chirildi.",
+        # Director profile & balance
+        "btn_profile": "👤 Mening profilim",
+        "btn_topup_balance": "💳 Balansni to'ldirish",
+        "btn_balance_history": "📜 Tranzaksiyalar tarixi",
+        "btn_dashboard": "📊 To'liq statistika (Dashboard)",
+        # Agent CRM
+        "btn_my_clients": "👥 Mening mijozlarim",
+        # Agent Instagram
+        "btn_instagram": "📷 Instagram ulash",
+        # Developer companies
+        "btn_companies": "🏢 Kompaniyalar",
+        "dev_new_topup": "💰 <b>Yangi balans to'ldirish</b>\n\nKompaniya: {company}\nDirektor: {name}\nSumma: ${amount}\nUsul: {method}",
         # Channel post format
         "channel_post": (
             "{type_icon} {prop_type} | {district}\n\n"

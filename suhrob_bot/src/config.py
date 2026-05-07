@@ -10,29 +10,31 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    BOT_TOKEN: str
-    BOT_NAME: str = "Suhrob HOUSE"
+    BOT_NAME: str = "Suhrob HOUSE Bot Platform"
+    USE_PREMIUM_EMOJI: bool = False
 
     DATABASE_URL: str
     REDIS_URL: str = "redis://redis:6379/0"
 
+    # Developer is the only hardcoded role — never blocked
     DEVELOPER_TELEGRAM_ID: int
-    DIRECTOR_TELEGRAM_ID: int = 5330161295
-    AGENT_TELEGRAM_IDS: list[int] = Field(
-        default=[7290922957, 983448748, 288872296]
-    )
+    DEVELOPER_NAME: str = "Developer"
 
-    ANTHROPIC_API_KEY: str = ""
-
-    # OpenAI-compatible API: Ollama, Together AI, Groq, etc.
-    # Example for Ollama: OPENAI_COMPAT_BASE_URL=http://your-server:11434
-    OPENAI_COMPAT_BASE_URL: str = ""
-    OPENAI_COMPAT_API_KEY: str = ""
-    OPENAI_COMPAT_MODEL: str = "llama3"
+    # Claude AI
+    ANTHROPIC_API_KEY: str = "REPLACE_WITH_YOUR_API_KEY"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
+    AI_DAILY_LIMIT_PER_USER: int = 50
 
     MEDIA_PATH: str = "/var/suhrob_bot/media"
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Tashkent"
+
+    # Premium emoji IDs (optional, used when USE_PREMIUM_EMOJI=true)
+    PREMIUM_EMOJI_HOUSE: str = ""
+    PREMIUM_EMOJI_MONEY: str = ""
+    PREMIUM_EMOJI_LOCATION: str = ""
+    PREMIUM_EMOJI_FIRE: str = ""
+    PREMIUM_EMOJI_STAR: str = ""
 
     @field_validator("DATABASE_URL")
     @classmethod

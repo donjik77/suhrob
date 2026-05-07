@@ -8,24 +8,36 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
 
 from src.config import settings
+from src.bot.manager import BotManager
 from src.bot.middlewares.auth import AuthMiddleware
+from src.bot.middlewares.company_context import CompanyContextMiddleware
 from src.bot.middlewares.subscription import SubscriptionMiddleware
 from src.bot.middlewares.logging import LoggingMiddleware
 
+# Handlers
 from src.bot.handlers.common import router as common_router
 from src.bot.handlers.client.search import router as search_router
 from src.bot.handlers.client.favorites import router as favorites_router
 from src.bot.handlers.client.start import router as client_start_router
+from src.bot.handlers.client.ai_consultation import router as ai_consult_router
+from src.bot.handlers.client.alerts import router as alerts_router
+from src.bot.handlers.client.mortgage import router as mortgage_router
 from src.bot.handlers.agent.add_property import router as add_property_router
 from src.bot.handlers.agent.my_properties import router as my_properties_router
+from src.bot.handlers.agent.my_clients import router as my_clients_router
 from src.bot.handlers.agent.scheduled_posts import router as scheduled_posts_router
 from src.bot.handlers.agent.stats import router as agent_stats_router
 from src.bot.handlers.agent.agent_settings import router as agent_settings_router
+from src.bot.handlers.agent.instagram import router as instagram_router
 from src.bot.handlers.director.agents import router as director_agents_router
 from src.bot.handlers.director.subscription import router as subscription_router
 from src.bot.handlers.director.properties import router as director_properties_router
+from src.bot.handlers.director.profile import router as director_profile_router
+from src.bot.handlers.director.balance import router as director_balance_router
+from src.bot.handlers.director.dashboard import router as dashboard_router
 from src.bot.handlers.developer.payments import router as dev_payments_router
 from src.bot.handlers.developer.settings import router as dev_settings_router
+from src.bot.handlers.developer.companies import router as dev_companies_router
 
 from src.scheduler.setup import setup_scheduler
 
@@ -53,52 +65,105 @@ def setup_logging():
     )
 
 
-async def main():
-    setup_logging()
-    logger = structlog.get_logger()
-    logger.info("bot_starting", bot_name=settings.BOT_NAME)
-
-    storage = RedisStorage.from_url(settings.REDIS_URL)
-
-    bot = Bot(
-        token=settings.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
-
+def build_dispatcher(storage) -> Dispatcher:
     dp = Dispatcher(storage=storage)
+    return dp
 
-    # Middlewares (order matters)
-    dp.update.outer_middleware(LoggingMiddleware())
-    dp.update.outer_middleware(AuthMiddleware())
-    dp.update.outer_middleware(SubscriptionMiddleware())
 
-    # Routers — order matters for priority
+def register_routers(dp: Dispatcher) -> None:
+    # Order matters: more specific routes first
     dp.include_router(common_router)
     dp.include_router(search_router)
     dp.include_router(favorites_router)
     dp.include_router(client_start_router)
+    dp.include_router(ai_consult_router)
+    dp.include_router(alerts_router)
+    dp.include_router(mortgage_router)
     dp.include_router(add_property_router)
     dp.include_router(my_properties_router)
+    dp.include_router(my_clients_router)
     dp.include_router(scheduled_posts_router)
     dp.include_router(agent_stats_router)
     dp.include_router(agent_settings_router)
+    dp.include_router(instagram_router)
     dp.include_router(director_agents_router)
     dp.include_router(director_properties_router)
+    dp.include_router(director_profile_router)
+    dp.include_router(director_balance_router)
+    dp.include_router(dashboard_router)
     dp.include_router(subscription_router)
     dp.include_router(dev_payments_router)
     dp.include_router(dev_settings_router)
+    dp.include_router(dev_companies_router)
 
-    # Scheduler
-    scheduler = setup_scheduler(bot)
-    scheduler.start()
 
-    logger.info("bot_started", polling=True)
+async def main():
+    setup_logging()
+    logger = structlog.get_logger()
+    logger.info("bot_platform_starting", name=settings.BOT_NAME)
+
+    storage = RedisStorage.from_url(settings.REDIS_URL)
+    dp = build_dispatcher(storage)
+
+    # Build BotManager (manages all company bots)
+    bot_manager = BotManager(dp)
+
+    # Middlewares (order matters — company context before auth)
+    dp.update.outer_middleware(LoggingMiddleware())
+    dp.update.outer_middleware(CompanyContextMiddleware(bot_manager))
+    dp.update.outer_middleware(AuthMiddleware())
+    dp.update.outer_middleware(SubscriptionMiddleware())
+
+    register_routers(dp)
+
+    # Developer's own bot (uses DEVELOPER_TELEGRAM_ID, no company)
+    # This bot token must still be set — use any single company bot token or a dedicated dev bot
+    # For single-company setups, set BOT_TOKEN in .env as a fallback.
+    dev_bot_token = None
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-    finally:
-        scheduler.shutdown()
-        await bot.session.close()
-        logger.info("bot_stopped")
+        from src.config import settings as s
+        import os
+        dev_bot_token = os.environ.get("BOT_TOKEN") or None
+    except Exception:
+        pass
+
+    # Start all company bots from DB
+    await bot_manager.start_all()
+
+    # If a fallback BOT_TOKEN is set and no bots loaded, run it for dev/initial setup
+    if bot_manager.running_count() == 0 and dev_bot_token:
+        logger.warning("no_company_bots_found", message="Starting with fallback BOT_TOKEN for initial setup")
+        dev_bot = Bot(
+            token=dev_bot_token,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+        scheduler = setup_scheduler(dev_bot)
+        scheduler.start()
+        logger.info("fallback_bot_started")
+        try:
+            await dp.start_polling(dev_bot, allowed_updates=dp.resolve_used_update_types())
+        finally:
+            scheduler.shutdown()
+            await dev_bot.session.close()
+    else:
+        # Pick one bot for scheduler (first active company bot)
+        scheduler_bot = None
+        if bot_manager._bots:
+            scheduler_bot = next(iter(bot_manager._bots.values()))
+        if scheduler_bot:
+            scheduler = setup_scheduler(scheduler_bot)
+            scheduler.start()
+
+        logger.info("bot_platform_started", count=bot_manager.running_count())
+        try:
+            # Keep running until cancelled
+            await asyncio.Event().wait()
+        finally:
+            if scheduler_bot:
+                scheduler.shutdown()
+            await bot_manager.stop_all()
+
+    logger.info("bot_platform_stopped")
 
 
 if __name__ == "__main__":
