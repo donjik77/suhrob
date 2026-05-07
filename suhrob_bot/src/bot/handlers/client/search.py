@@ -1,0 +1,230 @@
+from decimal import Decimal
+from typing import Optional
+
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+
+from src.db.models import User, UserRole, PropertyType
+from src.db.session import AsyncSessionFactory
+from src.db.repositories.property_repo import PropertyRepository
+from src.db.repositories.settings_repo import SettingsRepository
+from src.bot.states.search import SearchStates
+from src.bot.keyboards.client import (
+    search_type_kb, search_district_kb, search_rooms_kb,
+    search_price_kb, property_card_kb, search_results_kb, no_results_kb,
+)
+from src.services.search_service import SearchService
+from src.utils.formatters import format_property_card
+from src.utils.parsers import parse_price_range
+from locales.uz import t
+
+router = Router()
+
+
+@router.message(F.text == "🔍 Uy qidirish")
+async def start_search(message: Message, state: FSMContext, db_user: User):
+    await state.clear()
+    await state.set_state(SearchStates.choosing_type)
+    await message.answer(t("search_type"), reply_markup=search_type_kb())
+
+
+@router.callback_query(F.data.startswith("search_type:"), SearchStates.choosing_type)
+async def choose_type(callback: CallbackQuery, state: FSMContext):
+    ptype = callback.data.split(":")[1]
+    await state.update_data(property_type=ptype)
+    await state.set_state(SearchStates.choosing_district)
+
+    async with AsyncSessionFactory() as session:
+        # Get company_id from user's company or use first active company
+        repo = PropertyRepository(session)
+        # For client search we need a company context — use all active districts for now
+        # In multi-tenant future this would be scoped
+        from sqlalchemy import select
+        from src.db.models import Property, PropertyStatus
+        result = await session.execute(
+            select(Property.location_district)
+            .where(Property.status == PropertyStatus.active)
+            .distinct()
+            .order_by(Property.location_district)
+        )
+        districts = [row[0] for row in result.all()]
+
+    await callback.message.edit_text(
+        t("search_district"),
+        reply_markup=search_district_kb(districts),
+    )
+
+
+@router.callback_query(F.data.startswith("search_district:"), SearchStates.choosing_district)
+async def choose_district(callback: CallbackQuery, state: FSMContext):
+    district = callback.data.split(":", 1)[1]
+    if district == "__other__":
+        await state.set_state(SearchStates.entering_district)
+        await callback.message.edit_text(t("district_input"))
+        return
+
+    await state.update_data(district=district)
+    await state.set_state(SearchStates.choosing_rooms)
+    await callback.message.edit_text(t("search_rooms"), reply_markup=search_rooms_kb())
+
+
+@router.message(SearchStates.entering_district)
+async def enter_district(message: Message, state: FSMContext):
+    await state.update_data(district=message.text.strip())
+    await state.set_state(SearchStates.choosing_rooms)
+    await message.answer(t("search_rooms"), reply_markup=search_rooms_kb())
+
+
+@router.callback_query(F.data.startswith("search_rooms:"), SearchStates.choosing_rooms)
+async def choose_rooms(callback: CallbackQuery, state: FSMContext):
+    rooms_val = callback.data.split(":")[1]
+    rooms = None if rooms_val == "any" else (5 if rooms_val == "5+" else int(rooms_val))
+    await state.update_data(rooms=rooms)
+    await state.set_state(SearchStates.choosing_price)
+    await callback.message.edit_text(t("search_price"), reply_markup=search_price_kb())
+
+
+@router.callback_query(F.data.startswith("search_price:"), SearchStates.choosing_price)
+async def choose_price(callback: CallbackQuery, state: FSMContext):
+    price_val = callback.data.split(":", 1)[1]
+
+    if price_val == "custom":
+        await state.set_state(SearchStates.entering_custom_price)
+        await callback.message.edit_text(t("price_custom_prompt"))
+        return
+
+    parts = price_val.split(":")
+    price_min = Decimal(parts[0]) if parts[0] else None
+    price_max = Decimal(parts[1]) if len(parts) > 1 and parts[1] else None
+    await state.update_data(price_min=str(price_min) if price_min else None, price_max=str(price_max) if price_max else None)
+
+    await _do_search(callback.message, state, edit=True)
+
+
+@router.message(SearchStates.entering_custom_price)
+async def enter_custom_price(message: Message, state: FSMContext):
+    price_min, price_max = parse_price_range(message.text)
+    if price_min is None and price_max is None:
+        await message.answer(t("price_parse_error"))
+        return
+
+    await state.update_data(
+        price_min=str(price_min) if price_min else None,
+        price_max=str(price_max) if price_max else None,
+    )
+    await _do_search(message, state, edit=False)
+
+
+async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
+    data = await state.get_data()
+
+    district: Optional[str] = data.get("district")
+    rooms: Optional[int] = data.get("rooms")
+    price_min = Decimal(data["price_min"]) if data.get("price_min") else None
+    price_max = Decimal(data["price_max"]) if data.get("price_max") else None
+    ptype_str = data.get("property_type")
+    ptype = PropertyType(ptype_str) if ptype_str else None
+
+    async with AsyncSessionFactory() as session:
+        settings_repo = SettingsRepository(session)
+        rate = await settings_repo.get_float("currency_rate_uzs_per_usd", default=12600.0)
+
+        search_svc = SearchService(session)
+        props, exact = await search_svc.search(
+            district=district,
+            price_min=price_min,
+            price_max=price_max,
+            rooms=rooms,
+            property_type=ptype,
+        )
+
+        # Log search request
+        # (user_id needs to be threaded; skip for now, added in iteration 5)
+
+    await state.set_state(SearchStates.showing_results)
+
+    if not props:
+        text = t("results_none")
+        kb = no_results_kb()
+        if edit:
+            await message_or_obj.edit_text(text, reply_markup=kb)
+        else:
+            await message_or_obj.answer(text, reply_markup=kb)
+        return
+
+    if exact:
+        header = t("results_found", count=len(props))
+        kb = search_results_kb()
+    else:
+        header = t("results_not_found")
+        kb = no_results_kb()
+
+    if edit:
+        await message_or_obj.edit_text(header)
+    else:
+        await message_or_obj.answer(header)
+
+    for prop in props:
+        card_text = format_property_card(prop, rate)
+        prop_kb = property_card_kb(prop.id)
+
+        if prop.media:
+            first_media = prop.media[0]
+            from aiogram.types import InputMediaPhoto
+            if first_media.file_type.value == "photo":
+                await message_or_obj.answer_photo(
+                    photo=first_media.file_id,
+                    caption=card_text,
+                    reply_markup=prop_kb,
+                )
+            else:
+                await message_or_obj.answer(card_text, reply_markup=prop_kb)
+        else:
+            await message_or_obj.answer(card_text, reply_markup=prop_kb)
+
+    # Show navigation keyboard as separate message
+    nav_msg = await message_or_obj.answer("—", reply_markup=kb)
+
+
+# Back navigation handlers
+@router.callback_query(F.data.startswith("search_back:"))
+async def search_back(callback: CallbackQuery, state: FSMContext):
+    target = callback.data.split(":")[1]
+
+    if target == "start":
+        await state.clear()
+        await callback.message.edit_text(t("search_type"), reply_markup=search_type_kb())
+        await state.set_state(SearchStates.choosing_type)
+    elif target == "type":
+        await state.set_state(SearchStates.choosing_type)
+        await callback.message.edit_text(t("search_type"), reply_markup=search_type_kb())
+    elif target == "district":
+        await state.set_state(SearchStates.choosing_district)
+        async with AsyncSessionFactory() as session:
+            from sqlalchemy import select
+            from src.db.models import Property, PropertyStatus
+            result = await session.execute(
+                select(Property.location_district)
+                .where(Property.status == PropertyStatus.active)
+                .distinct()
+                .order_by(Property.location_district)
+            )
+            districts = [row[0] for row in result.all()]
+        await callback.message.edit_text(t("search_district"), reply_markup=search_district_kb(districts))
+    elif target == "rooms":
+        await state.set_state(SearchStates.choosing_rooms)
+        await callback.message.edit_text(t("search_rooms"), reply_markup=search_rooms_kb())
+
+
+@router.callback_query(F.data == "search_new")
+async def new_search(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(SearchStates.choosing_type)
+    await callback.message.answer(t("search_type"), reply_markup=search_type_kb())
+
+
+@router.callback_query(F.data == "search_notify")
+async def notify_on_new(callback: CallbackQuery, state: FSMContext, db_user: User):
+    # TODO: implement notification subscription in a later iteration
+    await callback.answer("Yangi uylar chiqganda xabar beramiz! ✅", show_alert=True)

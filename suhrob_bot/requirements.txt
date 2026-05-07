@@ -1,0 +1,13 @@
+aiogram==3.13.1
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+redis==5.2.0
+apscheduler==3.10.4
+pydantic-settings==2.6.1
+pydantic==2.10.3
+structlog==24.4.0
+python-dotenv==1.0.1
+Pillow==11.0.0
+aiofiles==24.1.0
+pytz==2024.2
