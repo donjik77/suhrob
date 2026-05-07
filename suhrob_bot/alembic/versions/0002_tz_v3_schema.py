@@ -14,32 +14,19 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _create_enum(name: str, *values: str) -> None:
+    vals = ", ".join(f"'{v}'" for v in values)
+    op.execute(sa.text(f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); EXCEPTION WHEN duplicate_object THEN NULL; END $$"))
+
+
 def upgrade() -> None:
-    # ── New enums ────────────────────────────────────────────────────
-    subscription_type = sa.Enum("base", "instagram", name="subscriptiontype")
-    subscription_type.create(op.get_bind(), checkfirst=True)
-
-    payment_source = sa.Enum("balance", "manual_proof", name="paymentsource")
-    payment_source.create(op.get_bind(), checkfirst=True)
-
-    transaction_type = sa.Enum(
-        "topup", "subscription_charge", "instagram_charge", "refund",
-        name="transactiontype",
-    )
-    transaction_type.create(op.get_bind(), checkfirst=True)
-
-    transaction_status = sa.Enum("pending", "completed", "failed", name="transactionstatus")
-    transaction_status.create(op.get_bind(), checkfirst=True)
-
-    post_platform = sa.Enum("telegram", "instagram", name="postplatform")
-    post_platform.create(op.get_bind(), checkfirst=True)
-
-    lead_status = sa.Enum(
-        "new", "contacted", "showing_scheduled", "negotiation",
-        "closed_won", "closed_lost",
-        name="leadstatus",
-    )
-    lead_status.create(op.get_bind(), checkfirst=True)
+    # ── New enums (idempotent via DO block) ──────────────────────────
+    _create_enum("subscriptiontype", "base", "instagram")
+    _create_enum("paymentsource", "balance", "manual_proof")
+    _create_enum("transactiontype", "topup", "subscription_charge", "instagram_charge", "refund")
+    _create_enum("transactionstatus", "pending", "completed", "failed")
+    _create_enum("postplatform", "telegram", "instagram")
+    _create_enum("leadstatus", "new", "contacted", "showing_scheduled", "negotiation", "closed_won", "closed_lost")
 
     # Add "draft" to existing propertystatus enum (PostgreSQL ALTER TYPE)
     op.execute("ALTER TYPE propertystatus ADD VALUE IF NOT EXISTS 'draft'")
