@@ -26,7 +26,8 @@ class SubscriptionMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        if user.role == UserRole.developer:
+        # Developer and clients are never blocked by subscription checks
+        if user.role in (UserRole.developer, UserRole.client):
             return await handler(event, data)
 
         session = data.get("db_session")
@@ -38,8 +39,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         if user.company_id:
             blocked = await repo.is_blocked(user.company_id)
         else:
-            # Client has no company — block if there is no active subscription anywhere
-            blocked = await repo.is_service_blocked()
+            blocked = False
 
         if blocked:
             if isinstance(event, (Message, CallbackQuery)):

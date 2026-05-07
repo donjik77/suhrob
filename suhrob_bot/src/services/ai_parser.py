@@ -26,10 +26,59 @@ FAQAT JSON qaytaring, hech qanday qo'shimcha matn yo'q:
 {{"property_type": ..., "district": ..., "address": ..., "rooms": ..., "floor": ..., "total_floors": ..., "area_sqm": ..., "price_usd": ..., "description": ...}}"""
 
 
+async def _call_openai_compat(text: str) -> dict | None:
+    """Call any OpenAI-compatible API (Ollama, Together AI, Groq, etc.)."""
+    from src.config import settings
+    import httpx
+
+    base_url = settings.OPENAI_COMPAT_BASE_URL.rstrip("/")
+    # Support both http://host:port and http://host:port/v1 formats
+    if base_url.endswith("/v1"):
+        url = f"{base_url}/chat/completions"
+    else:
+        url = f"{base_url}/v1/chat/completions"
+
+    headers = {"Content-Type": "application/json"}
+    if settings.OPENAI_COMPAT_API_KEY:
+        headers["Authorization"] = f"Bearer {settings.OPENAI_COMPAT_API_KEY}"
+
+    payload = {
+        "model": settings.OPENAI_COMPAT_MODEL,
+        "messages": [{"role": "user", "content": PARSE_PROMPT.format(text=text)}],
+        "max_tokens": 512,
+        "temperature": 0,
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        raw = resp.json()["choices"][0]["message"]["content"].strip()
+
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+
+    return json.loads(raw)
+
+
 async def parse_property_from_text(text: str) -> dict:
-    """Parse property data from free-form text. Uses Claude AI if API key is set, else regex fallback."""
+    """Parse property data from free-form text.
+    Priority: OpenAI-compat API → Anthropic → regex fallback.
+    """
     from src.config import settings
 
+    # 1. OpenAI-compatible API (Ollama, Groq, Together AI, etc.)
+    if settings.OPENAI_COMPAT_BASE_URL:
+        try:
+            parsed = await _call_openai_compat(text)
+            logger.info("OpenAI-compat parsing successful")
+            return _normalize(parsed)
+        except Exception as exc:
+            logger.error(f"OpenAI-compat parsing failed, trying next: {exc}")
+
+    # 2. Anthropic Claude
     if settings.ANTHROPIC_API_KEY:
         try:
             import anthropic
@@ -40,18 +89,18 @@ async def parse_property_from_text(text: str) -> dict:
                 messages=[{"role": "user", "content": PARSE_PROMPT.format(text=text)}],
             )
             raw = message.content[0].text.strip()
-            # Strip markdown code fences if present
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):
                     raw = raw[4:]
                 raw = raw.strip()
             parsed = json.loads(raw)
-            logger.info("AI parsing successful")
+            logger.info("Anthropic parsing successful")
             return _normalize(parsed)
         except Exception as exc:
-            logger.error(f"AI parsing failed, using regex fallback: {exc}")
+            logger.error(f"Anthropic parsing failed, using regex fallback: {exc}")
 
+    # 3. Regex fallback
     return _regex_fallback(text)
 
 

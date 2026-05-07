@@ -121,3 +121,32 @@ def delete_confirm_kb(property_id: int) -> InlineKeyboardMarkup:
     builder.button(text="❌ Yo'q", callback_data=f"prop_action:view:{property_id}")
     builder.adjust(2)
     return builder.as_markup()
+
+
+def edit_property_fields_kb(property_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    fields = [
+        ("🏠 Tur",      "property_type"),
+        ("📍 Tuman",    "location_district"),
+        ("🏠 Manzil",   "location_address"),
+        ("🚪 Xonalar",  "rooms"),
+        ("🏢 Qavat",    "floor"),
+        ("🏢 Jami qavat", "total_floors"),
+        ("📐 Maydon",   "area_sqm"),
+        ("💰 Narx",     "price_usd"),
+        ("📝 Tavsif",   "description"),
+    ]
+    for label, field in fields:
+        builder.button(text=label, callback_data=f"edit_prop_field:{property_id}:{field}")
+    builder.button(text="✅ Tayyor", callback_data=f"prop_action:view:{property_id}")
+    builder.adjust(2, 2, 2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def type_select_existing_kb(property_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🏢 Kvartira", callback_data=f"edit_prop_type:{property_id}:apartment")
+    b.button(text="🏡 Hovli",   callback_data=f"edit_prop_type:{property_id}:house")
+    b.button(text="🏪 Tijorat", callback_data=f"edit_prop_type:{property_id}:commercial")
+    b.adjust(3)
+    return b.as_markup()

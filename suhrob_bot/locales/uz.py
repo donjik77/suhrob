@@ -214,6 +214,20 @@ TEXTS = {
         "invoice_btn_custom": "O'z summam",
         "invoice_custom_prompt": "Summani USD da kiriting:",
         "invoice_sent": "✅ Hisob {company} kompaniyasiga yuborildi.",
+        # Scheduled posts
+        "scheduled_posts_empty": "📅 Rejalashtirilgan postlar yo'q.",
+        "scheduled_posts_title": "📅 Rejalashtirilgan postlar ({count} ta):",
+        "scheduled_post_cancelled": "✅ Rejalashtirilgan post bekor qilindi.",
+        # Edit existing property
+        "edit_prop_choose": "✏️ Qaysi maydonni o'zgartirmoqchisiz?",
+        "edit_prop_updated": "✅ Yangilandi!",
+        "edit_prop_type_select": "Yangi turni tanlang:",
+        # Developer commands
+        "new_company_prompt_name": "🏢 Yangi kompaniya nomini kiriting:",
+        "new_company_prompt_channel": "Telegram kanal ID kiriting:\nMisol: @my_channel yoki -1001234567890\n\n/skip — keyinroq",
+        "new_company_created": "✅ Kompaniya yaratildi!\nNomi: {name}\nID: {id}",
+        "set_role_usage": "Foydalanish:\n/set_role <tg_id> <rol> [company_id]\n\nRollar: agent, director, client, developer",
+        "set_role_done": "✅ Foydalanuvchi yangilandi\nTG ID: {tg_id}\nRol: {role}",
         # Channel post format
         "channel_post": (
             "{type_icon} {prop_type} | {district}\n\n"

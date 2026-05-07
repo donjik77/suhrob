@@ -1,19 +1,35 @@
 import math
+from decimal import Decimal
 
 from aiogram import Router, F, Bot
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
-from src.db.models import User, UserRole, PropertyStatus
+from src.db.models import User, UserRole, PropertyStatus, PropertyType, Property
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
 from src.bot.keyboards.agent import (
-    my_properties_nav_kb, property_actions_kb, property_status_kb, delete_confirm_kb
+    my_properties_nav_kb, property_actions_kb, property_status_kb,
+    delete_confirm_kb, edit_property_fields_kb, type_select_existing_kb,
 )
+from src.bot.states.edit_property import EditExistingPropertyStates
 from src.bot.filters.role import RoleFilter
 from src.services.publisher_service import PublisherService
 from src.utils.formatters import format_property_card, PROPERTY_TYPE_ICONS
 from locales.uz import t
+
+EDIT_FIELD_PROMPTS = {
+    "location_district": "📍 Yangi tuman nomini kiriting:",
+    "location_address":  "🏠 Yangi manzilni kiriting (yoki /skip):",
+    "rooms":             "🚪 Yangi xonalar sonini kiriting (raqam):",
+    "floor":             "🏢 Yangi qavat raqamini kiriting (yoki /skip):",
+    "total_floors":      "🏢 Yangi jami qavatlar sonini kiriting (yoki /skip):",
+    "area_sqm":          "📐 Yangi maydonni m² da kiriting (yoki /skip):",
+    "price_usd":         "💰 Yangi narxni USD da kiriting (raqam):",
+    "description":       "📝 Yangi tavsifni kiriting:",
+}
+EDIT_INT_FIELDS = {"rooms", "floor", "total_floors"}
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
@@ -123,12 +139,99 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
                 reply_markup=delete_confirm_kb(property_id),
             )
 
+        elif action == "edit":
+            await callback.message.answer(
+                "✏️ Qaysi maydonni o'zgartirmoqchisiz?",
+                reply_markup=edit_property_fields_kb(property_id),
+            )
+
         elif action == "publish":
             publisher = PublisherService(session, bot)
             success, msg = await publisher.publish(property_id)
             await callback.message.answer(msg)
 
     await callback.answer()
+
+
+# ─── Edit existing property ───────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("edit_prop_field:"))
+async def start_edit_field(callback: CallbackQuery, state: FSMContext):
+    _, prop_id_str, field = callback.data.split(":", 2)
+    prop_id = int(prop_id_str)
+
+    if field == "property_type":
+        await callback.message.answer(
+            "Yangi turni tanlang:", reply_markup=type_select_existing_kb(prop_id)
+        )
+        await callback.answer()
+        return
+
+    await state.set_state(EditExistingPropertyStates.entering_field_value)
+    await state.update_data(edit_prop_id=prop_id, edit_field=field)
+    await callback.message.answer(EDIT_FIELD_PROMPTS.get(field, f"{field} kiriting:"))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("edit_prop_type:"))
+async def save_prop_type(callback: CallbackQuery):
+    _, prop_id_str, ptype = callback.data.split(":", 2)
+    prop_id = int(prop_id_str)
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import update as sa_update
+        await session.execute(
+            sa_update(Property)
+            .where(Property.id == prop_id)
+            .values(property_type=PropertyType(ptype))
+        )
+        await session.commit()
+
+    await callback.answer("✅ Tur yangilandi", show_alert=True)
+    await callback.message.answer(
+        "✏️ Boshqa maydonni o'zgartirish:", reply_markup=edit_property_fields_kb(prop_id)
+    )
+
+
+@router.message(EditExistingPropertyStates.entering_field_value, F.text)
+async def save_edit_field_value(message: Message, state: FSMContext):
+    data = await state.get_data()
+    prop_id: int = data["edit_prop_id"]
+    field: str = data["edit_field"]
+    raw = message.text.strip()
+
+    if raw == "/skip":
+        value = None
+    elif field in EDIT_INT_FIELDS:
+        try:
+            value = int(raw.replace(",", "").replace(" ", "").split(".")[0])
+        except ValueError:
+            await message.answer("❌ Raqam kiriting.")
+            return
+    elif field == "price_usd":
+        try:
+            value = Decimal(raw.replace(",", "").replace(" ", ""))
+        except Exception:
+            await message.answer("❌ Raqam kiriting. Misol: 65000")
+            return
+    elif field == "area_sqm":
+        try:
+            value = Decimal(raw.replace(",", "."))
+        except Exception:
+            await message.answer("❌ Raqam kiriting. Misol: 75.5")
+            return
+    else:
+        value = raw
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import update as sa_update
+        await session.execute(
+            sa_update(Property).where(Property.id == prop_id).values(**{field: value})
+        )
+        await session.commit()
+
+    await state.clear()
+    await message.answer("✅ Yangilandi!", reply_markup=edit_property_fields_kb(prop_id))
 
 
 @router.callback_query(F.data.startswith("prop_setstatus:"))

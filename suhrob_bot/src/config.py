@@ -24,6 +24,12 @@ class Settings(BaseSettings):
 
     ANTHROPIC_API_KEY: str = ""
 
+    # OpenAI-compatible API: Ollama, Together AI, Groq, etc.
+    # Example for Ollama: OPENAI_COMPAT_BASE_URL=http://your-server:11434
+    OPENAI_COMPAT_BASE_URL: str = ""
+    OPENAI_COMPAT_API_KEY: str = ""
+    OPENAI_COMPAT_MODEL: str = "llama3"
+
     MEDIA_PATH: str = "/var/suhrob_bot/media"
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Tashkent"
