@@ -91,7 +91,17 @@ def upgrade() -> None:
     op.add_column("notifications_log", sa.Column("related_property_id", sa.Integer(), sa.ForeignKey("properties.id"), nullable=True))
     op.add_column("notifications_log", sa.Column("message_text", sa.Text(), nullable=True))
     # Change notification_type to String to support more types without enum migrations
-    op.alter_column("notifications_log", "notification_type", type_=sa.String(50), existing_nullable=False)
+    # postgresql_using is required because PostgreSQL cannot auto-cast ENUM → varchar
+    op.alter_column(
+        "notifications_log", "notification_type",
+        type_=sa.String(50),
+        existing_type=sa.Enum(
+            "payment_reminder_3days", "payment_due", "blocked", "payment_received",
+            name="notificationtype",
+        ),
+        existing_nullable=False,
+        postgresql_using="notification_type::text",
+    )
 
     # ── New tables ───────────────────────────────────────────────────
 
