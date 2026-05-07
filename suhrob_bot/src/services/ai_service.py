@@ -1,26 +1,39 @@
 """
-AI Service — wraps Claude API for all AI-powered features.
+AI Service — wraps OpenRouter API for all AI-powered features.
 
-API key is read from settings.ANTHROPIC_API_KEY.
-Set ANTHROPIC_API_KEY in your .env file before using AI features.
+Uses the OpenAI-compatible endpoint at https://openrouter.ai/api/v1.
+Set OPENROUTER_API_KEY and OPENROUTER_MODEL in your .env file.
 """
 import json
 import re
 import structlog
 from typing import Optional
 
-import anthropic
+from openai import AsyncOpenAI
 
 from src.config import settings
 
 logger = structlog.get_logger()
 
-# Fallback description used when Claude API is unavailable
 _FALLBACK_DESCRIPTION = "Ushbu ko'chmas mulk haqida batafsil ma'lumot uchun agent bilan bog'laning."
 
 
-def _client() -> anthropic.AsyncAnthropic:
-    return anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+def _client() -> AsyncOpenAI:
+    return AsyncOpenAI(
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+    )
+
+
+async def _chat(messages: list[dict], max_tokens: int = 512) -> str:
+    """Send a chat request and return the response text."""
+    client = _client()
+    response = await client.chat.completions.create(
+        model=settings.OPENROUTER_MODEL,
+        max_tokens=max_tokens,
+        messages=messages,
+    )
+    return response.choices[0].message.content.strip()
 
 
 async def generate_property_description(data: dict) -> str:
@@ -46,20 +59,14 @@ Talablar:
 - Faqat tavsifni yoz, kirish yoki xulosa qo'shma"""
 
     try:
-        client = _client()
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        return await _chat([{"role": "user", "content": prompt}], max_tokens=512)
     except Exception as exc:
         logger.warning("ai_description_failed", error=str(exc))
         return _FALLBACK_DESCRIPTION
 
 
 async def evaluate_photo_quality(file_path: str) -> float:
-    """Score a property photo 0-10 using Claude Vision. Returns 5.0 on error."""
+    """Score a property photo 0-10 using vision model. Returns 5.0 on error."""
     import base64
     import pathlib
 
@@ -72,20 +79,16 @@ async def evaluate_photo_quality(file_path: str) -> float:
         media_type = f"image/{'jpeg' if suffix in ('jpg', 'jpeg') else suffix}"
 
         client = _client()
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
+        response = await client.chat.completions.create(
+            model=settings.OPENROUTER_MODEL,
             max_tokens=10,
             messages=[
                 {
                     "role": "user",
                     "content": [
                         {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_data,
-                            },
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{image_data}"},
                         },
                         {
                             "type": "text",
@@ -100,7 +103,7 @@ async def evaluate_photo_quality(file_path: str) -> float:
                 }
             ],
         )
-        text = response.content[0].text.strip()
+        text = response.choices[0].message.content.strip()
         match = re.search(r"\d+(?:\.\d)?", text)
         return float(match.group()) if match else 5.0
     except Exception as exc:
@@ -158,14 +161,7 @@ Faqat JSON qaytaring, boshqa hech narsa:
 }}"""
 
     try:
-        client = _client()
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text.strip()
-        # Extract JSON even if wrapped in markdown
+        text = await _chat([{"role": "user", "content": prompt}], max_tokens=512)
         json_match = re.search(r"\{[\s\S]*\}", text)
         if json_match:
             return json.loads(json_match.group())
@@ -206,13 +202,7 @@ Qoidalar:
 - Qisqa va aniq (2-3 gap)"""
 
     try:
-        client = _client()
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=256,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        return await _chat([{"role": "user", "content": prompt}], max_tokens=256)
     except Exception as exc:
         logger.warning("ai_property_answer_failed", error=str(exc))
         return "Bu savol uchun aniqroq ma'lumot uchun agent bilan bog'laning."
@@ -229,7 +219,7 @@ async def run_consultation(
     messages: [{role: "user"|"assistant", content: str}, ...]
     Returns the assistant reply text.
     """
-    system = f"""Siz "{company_name}" ko'chmas mulk kompaniyasining AI-konsultantisiz (O'zbekiston).
+    system_content = f"""Siz "{company_name}" ko'chmas mulk kompaniyasining AI-konsultantisiz (O'zbekiston).
 O'zbek tilida (lotin yozuvi), muloyim va professional muloqot qiling.
 
 Vazifalaringiz:
@@ -250,15 +240,10 @@ Qoidalar:
 - Mijoz jiddiy bo'lsa (byudjet aniq, muddat <3 oy) — agentga ulanishni taklif qiling
 - Faqat ko'rmoqda bo'lsa — muloyimlik bilan kontakt ma'lumotlarini so'rang"""
 
+    full_messages = [{"role": "system", "content": system_content}] + messages
+
     try:
-        client = _client()
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=512,
-            system=system,
-            messages=messages,
-        )
-        return response.content[0].text.strip()
+        return await _chat(full_messages, max_tokens=512)
     except Exception as exc:
         logger.warning("ai_consultation_failed", error=str(exc))
         return "Kechirasiz, hozir AI xizmati vaqtincha ishlamayapti. Iltimos, agentga to'g'ridan-to'g'ri murojaat qiling."
@@ -276,13 +261,7 @@ Xabar qisqa, do'stona, bosimchisiz bo'lsin (2-3 gap).
 Faqat xabar matnini yoz."""
 
     try:
-        client = _client()
-        response = await client.messages.create(
-            model=settings.ANTHROPIC_MODEL,
-            max_tokens=200,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        return await _chat([{"role": "user", "content": prompt}], max_tokens=200)
     except Exception as exc:
         logger.warning("ai_followup_failed", error=str(exc))
         return f"Salom, {client_name}! {district} tumanidagi yangi variantlar bor. Ko'rasizmi?"

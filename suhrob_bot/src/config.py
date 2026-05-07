@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     DEVELOPER_TELEGRAM_ID: int
     DEVELOPER_NAME: str = "Developer"
 
-    # Claude AI
-    ANTHROPIC_API_KEY: str = "REPLACE_WITH_YOUR_API_KEY"
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-5"
+    # OpenRouter AI
+    OPENROUTER_API_KEY: str = "REPLACE_WITH_YOUR_API_KEY"
+    OPENROUTER_MODEL: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
     AI_DAILY_LIMIT_PER_USER: int = 50
 
     MEDIA_PATH: str = "/var/suhrob_bot/media"
