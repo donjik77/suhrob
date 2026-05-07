@@ -4,7 +4,7 @@ asyncpg==0.30.0
 alembic==1.14.0
 redis==5.2.0
 apscheduler==3.10.4
-pydantic-settings==2.9.2
+pydantic-settings==2.9.1
 pydantic==2.10.3
 structlog==24.4.0
 python-dotenv==1.0.1
