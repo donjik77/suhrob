@@ -1,11 +1,23 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.config import settings
-from src.db.models import Base
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Import Base and every model so their tables register on Base.metadata
+from src.db.models import (  # noqa: F401
+    Base,
+    Company, User, Property, PropertyMedia,
+    SearchRequest, ClientFavorite, ScheduledPost,
+    Subscription, NotificationLog, BotSetting,
+)
 
 config = context.config
 if config.config_file_name is not None:
@@ -14,10 +26,21 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+def get_url() -> str:
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Create suhrob_bot/.env or set the environment variable."
+        )
+    # Async engine requires postgresql+asyncpg://
+    if url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+    return url
+
+
 def run_migrations_offline() -> None:
-    url = settings.DATABASE_URL
     context.configure(
-        url=url,
+        url=get_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -33,7 +56,7 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    engine = create_async_engine(settings.DATABASE_URL)
+    engine = create_async_engine(get_url())
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()
