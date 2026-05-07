@@ -19,8 +19,10 @@ from src.bot.handlers.client.start import router as client_start_router
 from src.bot.handlers.agent.add_property import router as add_property_router
 from src.bot.handlers.agent.my_properties import router as my_properties_router
 from src.bot.handlers.agent.stats import router as agent_stats_router
+from src.bot.handlers.agent.agent_settings import router as agent_settings_router
 from src.bot.handlers.director.agents import router as director_agents_router
 from src.bot.handlers.director.subscription import router as subscription_router
+from src.bot.handlers.director.properties import router as director_properties_router
 from src.bot.handlers.developer.payments import router as dev_payments_router
 from src.bot.handlers.developer.settings import router as dev_settings_router
 
@@ -77,7 +79,9 @@ async def main():
     dp.include_router(add_property_router)
     dp.include_router(my_properties_router)
     dp.include_router(agent_stats_router)
+    dp.include_router(agent_settings_router)
     dp.include_router(director_agents_router)
+    dp.include_router(director_properties_router)
     dp.include_router(subscription_router)
     dp.include_router(dev_payments_router)
     dp.include_router(dev_settings_router)

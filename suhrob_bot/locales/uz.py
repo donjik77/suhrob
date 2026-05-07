@@ -74,6 +74,7 @@ TEXTS = {
         # Agent main menu
         "agent_menu_welcome": "👋 Salom, {name}!\n\nSizning panelingiz:",
         "btn_add_property": "➕ Yangi uy qo'shish",
+
         "btn_my_properties": "📋 Mening uylarim",
         "btn_scheduled_posts": "📅 Rejalashtirilgan postlar",
         "btn_stats": "📊 Statistika",
@@ -88,6 +89,28 @@ TEXTS = {
         "btn_confirm_payments": "✅ To'lovlarni tasdiqlash",
         "btn_companies": "🏢 Kompaniyalar",
         "btn_system_settings": "⚙️ Tizim sozlamalari",
+        # Agent personal settings
+        "agent_settings_menu": "⚙️ Sozlamalar\n\nIsm: {name}\nTelefon: {phone}\n\nNimani o'zgartirmoqchisiz?",
+        "agent_settings_name_prompt": "Yangi ismingizni kiriting (mijozlarga ko'rsatiladi):",
+        "agent_settings_phone_prompt": "Telefon raqamingizni kiriting:\nMisol: +998901234567",
+        "agent_settings_saved": "✅ {field} yangilandi: {value}",
+        # All properties (director/developer)
+        "all_props_title": "🏢 Barcha uylar (jami: {total})",
+        "all_props_empty": "🏢 Hozircha uylar yo'q.",
+        # Add property — new AI flow
+        "add_prop_instruction": (
+            "➕ <b>Yangi uy qo'shish</b>\n\n"
+            "Uy haqida barcha ma'lumotni <b>bitta xabarda</b> yozing va rasmlarni yuboring.\n\n"
+            "Misol:\n"
+            "<i>Mirzo-Ulug'bek tumani, kvartira, 3 xona, 5/9 qavat, 75 m², "
+            "narxi 65000$, Uzbekiston ko'chasi 15, evro remont, ipoteka bor</i>\n\n"
+            "📸 Rasmlar va videoni ham yuboring.\n"
+            "✅ Hammasi tayyor bo'lgach /done yozing."
+        ),
+        "add_prop_photo_received": "📸 {count} ta rasm qabul qilindi. Ko'proq yuboring yoki /done yozing.",
+        "add_prop_parsing": "⏳ Ma'lumotlar aniqlanmoqda...",
+        "add_prop_error_no_photos": "❌ Kamida 1 ta rasm yuboring.",
+        "add_prop_error_no_text": "❌ Uy haqida matn kiriting.",
         # Add property FSM
         "add_prop_start": "Yangi uy qo'shish boshlandi. Quyidagi savollarga javob bering.",
         "add_prop_type": "Mulk turini tanlang:",

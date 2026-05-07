@@ -10,8 +10,9 @@ from locales.uz import t
 
 class SubscriptionMiddleware(BaseMiddleware):
     """
-    Blocks non-developer users when the company subscription is expired or blocked.
-    Must run after AuthMiddleware (requires data['db_user'] and data['db_session']).
+    Blocks non-developer users when the company subscription is expired/blocked.
+    When there is no active subscription at all, blocks clients too.
+    Must run after AuthMiddleware.
     """
 
     async def __call__(
@@ -25,12 +26,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        # Developer is never blocked
         if user.role == UserRole.developer:
-            return await handler(event, data)
-
-        # Clients without a company — allow through (they see public info)
-        if user.company_id is None:
             return await handler(event, data)
 
         session = data.get("db_session")
@@ -38,19 +34,24 @@ class SubscriptionMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         repo = SubscriptionRepository(session)
-        blocked = await repo.is_blocked(user.company_id)
+
+        if user.company_id:
+            blocked = await repo.is_blocked(user.company_id)
+        else:
+            # Client has no company — block if there is no active subscription anywhere
+            blocked = await repo.is_service_blocked()
 
         if blocked:
             if isinstance(event, (Message, CallbackQuery)):
-                if user.role == UserRole.client:
-                    msg = t("service_blocked_client")
-                else:
-                    msg = t("service_blocked_agent")
-
+                msg = (
+                    t("service_blocked_client")
+                    if user.role == UserRole.client
+                    else t("service_blocked_agent")
+                )
                 if isinstance(event, Message):
                     await event.answer(msg)
-                elif isinstance(event, CallbackQuery):
+                else:
                     await event.answer(msg, show_alert=True)
-            return  # Stop processing
+            return
 
         return await handler(event, data)

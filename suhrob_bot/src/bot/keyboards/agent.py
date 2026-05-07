@@ -29,12 +29,36 @@ def agent_menu_kb(role: UserRole) -> ReplyKeyboardMarkup:
     return kb.as_markup(resize_keyboard=True)
 
 
+def type_select_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🏢 Kvartira", callback_data="add_prop_type:apartment")
+    b.button(text="🏡 Hovli", callback_data="add_prop_type:house")
+    b.button(text="🏪 Tijorat", callback_data="add_prop_type:commercial")
+    b.adjust(3)
+    return b.as_markup()
+
+
+def parsed_preview_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="✏️ Tur", callback_data="edit_field:property_type")
+    b.button(text="✏️ Tuman", callback_data="edit_field:district")
+    b.button(text="✏️ Manzil", callback_data="edit_field:address")
+    b.button(text="✏️ Xonalar", callback_data="edit_field:rooms")
+    b.button(text="✏️ Qavat", callback_data="edit_field:floor")
+    b.button(text="✏️ Maydon", callback_data="edit_field:area_sqm")
+    b.button(text="✏️ Narx", callback_data="edit_field:price_usd")
+    b.button(text="✏️ Tavsif", callback_data="edit_field:description")
+    b.button(text="✅ Tasdiqlash", callback_data="parsed_confirm")
+    b.button(text="❌ Bekor qilish", callback_data="parsed_cancel")
+    b.adjust(2, 2, 2, 2, 1, 1)
+    return b.as_markup()
+
+
 def add_district_kb(districts: list[str]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for d in districts:
         builder.button(text=d, callback_data=f"add_prop_district:{d}")
     builder.button(text=t("add_prop_district_new"), callback_data="add_prop_district:__new__")
-    builder.button(text=t("back"), callback_data="add_prop_back:type")
     builder.adjust(2)
     return builder.as_markup()
 
@@ -59,7 +83,6 @@ def preview_kb() -> InlineKeyboardMarkup:
 
 def my_properties_nav_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    nav_row = []
     if page > 1:
         builder.button(text="⬅️", callback_data=f"my_props_page:{page - 1}")
     builder.button(text=f"Sahifa {page}/{total_pages}", callback_data="noop")
@@ -83,7 +106,6 @@ def property_actions_kb(property_id: int) -> InlineKeyboardMarkup:
 
 
 def property_status_kb(property_id: int) -> InlineKeyboardMarkup:
-    from src.db.models import PropertyStatus
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Faol", callback_data=f"prop_setstatus:{property_id}:active")
     builder.button(text="✔️ Sotilgan", callback_data=f"prop_setstatus:{property_id}:sold")

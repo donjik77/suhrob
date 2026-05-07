@@ -1,4 +1,4 @@
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Update, Message, CallbackQuery
@@ -7,6 +7,16 @@ from src.db.session import AsyncSessionFactory
 from src.db.repositories.user_repo import UserRepository
 from src.db.models import UserRole
 from src.config import settings
+
+
+def _expected_role(tg_id: int) -> Optional[UserRole]:
+    if tg_id == settings.DEVELOPER_TELEGRAM_ID:
+        return UserRole.developer
+    if tg_id == settings.DIRECTOR_TELEGRAM_ID:
+        return UserRole.director
+    if tg_id in settings.AGENT_TELEGRAM_IDS:
+        return UserRole.agent
+    return None
 
 
 class AuthMiddleware(BaseMiddleware):
@@ -39,20 +49,31 @@ class AuthMiddleware(BaseMiddleware):
                 full_name=tg_user.full_name,
             )
 
-            if not is_new:
-                await repo.update_last_active(tg_user.id)
+            expected = _expected_role(tg_user.id)
 
-            # Ensure developer always has developer role
-            if tg_user.id == settings.DEVELOPER_TELEGRAM_ID and user.role != UserRole.developer:
-                from sqlalchemy import update
-                from src.db.models import User
+            if expected and (is_new or user.role != expected):
+                from sqlalchemy import update, select
+                from src.db.models import User, Company
+
+                updates: dict = {"role": expected}
+
+                # Assign company for director/agent if not yet set
+                if expected in (UserRole.director, UserRole.agent) and not user.company_id:
+                    company = (
+                        await session.execute(select(Company).limit(1))
+                    ).scalar_one_or_none()
+                    if company:
+                        updates["company_id"] = company.id
+
                 await session.execute(
                     update(User)
                     .where(User.telegram_user_id == tg_user.id)
-                    .values(role=UserRole.developer)
+                    .values(**updates)
                 )
                 await session.commit()
                 await session.refresh(user)
+            elif not is_new:
+                await repo.update_last_active(tg_user.id)
 
             data["db_user"] = user
             data["db_session"] = session

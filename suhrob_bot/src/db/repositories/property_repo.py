@@ -100,3 +100,21 @@ class PropertyRepository:
             update(Property).where(Property.id == property_id).values(telegram_post_id=post_id)
         )
         await self.session.commit()
+
+    async def get_company_properties(
+        self, company_id: int, offset: int = 0, limit: int = 5
+    ) -> tuple[list[Property], int]:
+        count_result = await self.session.execute(
+            select(func.count()).where(Property.company_id == company_id)
+        )
+        total = count_result.scalar_one()
+
+        result = await self.session.execute(
+            select(Property)
+            .where(Property.company_id == company_id)
+            .options(selectinload(Property.media), selectinload(Property.agent))
+            .order_by(Property.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.scalars().all()), total

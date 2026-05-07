@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from typing import Optional
 
 
@@ -17,9 +17,14 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     DEVELOPER_TELEGRAM_ID: int
+    DIRECTOR_TELEGRAM_ID: int = 5330161295
+    AGENT_TELEGRAM_IDS: list[int] = Field(
+        default=[7290922957, 983448748, 288872296]
+    )
+
+    ANTHROPIC_API_KEY: str = ""
 
     MEDIA_PATH: str = "/var/suhrob_bot/media"
-
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Tashkent"
 

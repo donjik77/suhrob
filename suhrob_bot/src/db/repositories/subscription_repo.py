@@ -52,3 +52,13 @@ class SubscriptionRepository:
             select(Subscription).where(Subscription.id == sub_id)
         )
         return result.scalar_one_or_none()
+
+    async def is_service_blocked(self) -> bool:
+        """Returns True if there is no active subscription anywhere (whole service down)."""
+        from sqlalchemy import func
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Subscription)
+            .where(Subscription.status == SubscriptionStatus.active)
+        )
+        return (result.scalar_one() or 0) == 0
