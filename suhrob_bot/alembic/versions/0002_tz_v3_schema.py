@@ -76,10 +76,14 @@ def upgrade() -> None:
 
     # ── Alter subscriptions ──────────────────────────────────────────
     op.add_column("subscriptions", sa.Column(
-        "subscription_type", subscription_type, nullable=False, server_default=sa.text("'base'")
+        "subscription_type",
+        sa.Enum("base", "instagram", name="subscriptiontype", create_type=False),
+        nullable=False, server_default=sa.text("'base'")
     ))
     op.add_column("subscriptions", sa.Column(
-        "payment_source", payment_source, nullable=True
+        "payment_source",
+        sa.Enum("balance", "manual_proof", name="paymentsource", create_type=False),
+        nullable=True
     ))
     op.add_column("subscriptions", sa.Column(
         "auto_renewed", sa.Boolean(), nullable=False, server_default=sa.text("false")
@@ -87,7 +91,9 @@ def upgrade() -> None:
 
     # ── Alter scheduled_posts ────────────────────────────────────────
     op.add_column("scheduled_posts", sa.Column(
-        "platform", post_platform, nullable=False, server_default=sa.text("'telegram'")
+        "platform",
+        sa.Enum("telegram", "instagram", name="postplatform", create_type=False),
+        nullable=False, server_default=sa.text("'telegram'")
     ))
     op.add_column("scheduled_posts", sa.Column(
         "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
@@ -117,11 +123,20 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("amount_usd", sa.Numeric(10, 2), nullable=True),
         sa.Column("amount_uzs", sa.Numeric(15, 2), nullable=True),
-        sa.Column("transaction_type", transaction_type, nullable=False),
-        sa.Column("payment_method", sa.Enum("click", "humo", "uzcard", "crypto", "balance", name="paymentmethod"), nullable=True),
+        sa.Column("transaction_type", sa.Enum(
+            "topup", "subscription_charge", "instagram_charge", "refund",
+            name="transactiontype", create_type=False
+        ), nullable=False),
+        sa.Column("payment_method", sa.Enum(
+            "click", "humo", "uzcard", "crypto", "balance",
+            name="paymentmethod", create_type=False
+        ), nullable=True),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("related_subscription_id", sa.Integer(), sa.ForeignKey("subscriptions.id"), nullable=True),
-        sa.Column("status", transaction_status, nullable=False, server_default=sa.text("'pending'")),
+        sa.Column("status", sa.Enum(
+            "pending", "completed", "failed",
+            name="transactionstatus", create_type=False
+        ), nullable=False, server_default=sa.text("'pending'")),
         sa.Column("payment_proof_file_id", sa.String(500), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
@@ -178,7 +193,11 @@ def upgrade() -> None:
         sa.Column("client_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("agent_user_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("property_id", sa.Integer(), sa.ForeignKey("properties.id"), nullable=True),
-        sa.Column("status", lead_status, nullable=False, server_default=sa.text("'new'")),
+        sa.Column("status", sa.Enum(
+            "new", "contacted", "showing_scheduled", "negotiation",
+            "closed_won", "closed_lost",
+            name="leadstatus", create_type=False
+        ), nullable=False, server_default=sa.text("'new'")),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
