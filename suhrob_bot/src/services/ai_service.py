@@ -74,41 +74,55 @@ async def evaluate_photo_quality(file_path: str) -> float:
         path = pathlib.Path(file_path)
         if not path.exists():
             return 5.0
-        image_data = base64.standard_b64encode(path.read_bytes()).decode("utf-8")
+        image_bytes = path.read_bytes()
         suffix = path.suffix.lower().lstrip(".")
-        media_type = f"image/{'jpeg' if suffix in ('jpg', 'jpeg') else suffix}"
-
-        client = _client()
-        response = await client.chat.completions.create(
-            model=settings.OPENROUTER_MODEL,
-            max_tokens=10,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{media_type};base64,{image_data}"},
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                "Rate this real estate photo quality 0-10.\n"
-                                "Criteria: lighting (4pts), composition/framing (3pts), "
-                                "cleanliness/no clutter (2pts), visible room size (1pt).\n"
-                                "Reply with a single number only, one decimal place."
-                            ),
-                        },
-                    ],
-                }
-            ],
-        )
-        text = response.choices[0].message.content.strip()
-        match = re.search(r"\d+(?:\.\d)?", text)
-        return float(match.group()) if match else 5.0
+        return await _score_image_bytes(image_bytes, suffix)
     except Exception as exc:
         logger.warning("ai_photo_eval_failed", error=str(exc))
         return 5.0
+
+
+async def evaluate_photo_quality_from_bytes(image_bytes: bytes, ext: str = "jpg") -> float:
+    """Score a property photo (raw bytes) 0-10. Returns 5.0 on error."""
+    try:
+        return await _score_image_bytes(image_bytes, ext)
+    except Exception as exc:
+        logger.warning("ai_photo_eval_bytes_failed", error=str(exc))
+        return 5.0
+
+
+async def _score_image_bytes(image_bytes: bytes, ext: str) -> float:
+    import base64
+    media_type = f"image/{'jpeg' if ext in ('jpg', 'jpeg') else ext}"
+    image_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+    client = _client()
+    response = await client.chat.completions.create(
+        model=settings.OPENROUTER_MODEL,
+        max_tokens=10,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{image_data}"},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "Rate this real estate photo quality 0-10.\n"
+                            "Criteria: lighting (4pts), composition/framing (3pts), "
+                            "cleanliness/no clutter (2pts), visible room size (1pt).\n"
+                            "Reply with a single number only, one decimal place."
+                        ),
+                    },
+                ],
+            }
+        ],
+    )
+    text = response.choices[0].message.content.strip()
+    match = re.search(r"\d+(?:\.\d)?", text)
+    return float(match.group()) if match else 5.0
 
 
 async def qualify_client(conversation: list[dict]) -> dict:
@@ -247,6 +261,20 @@ Qoidalar:
     except Exception as exc:
         logger.warning("ai_consultation_failed", error=str(exc))
         return "Kechirasiz, hozir AI xizmati vaqtincha ishlamayapti. Iltimos, agentga to'g'ridan-to'g'ri murojaat qiling."
+
+
+def generate_property_title(data: dict) -> str:
+    """Generate a short readable property title (no AI call needed)."""
+    ptype_map = {"apartment": "Kvartira", "house": "Hovli", "commercial": "Tijorat"}
+    ptype = ptype_map.get(data.get("property_type", ""), "Uy")
+    district = data.get("district", "")
+    rooms = data.get("rooms")
+    parts = [ptype]
+    if rooms and str(rooms) != "any":
+        parts.append(f"{rooms} xona")
+    if district:
+        parts.append(district)
+    return " — ".join(parts)
 
 
 async def generate_follow_up_message(client_name: str, district: str, budget_str: str, day: int) -> str:

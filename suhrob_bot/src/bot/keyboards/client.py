@@ -8,8 +8,11 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardBuilder()
     kb.button(text=t("btn_search"))
     kb.button(text=t("btn_favorites"))
+    kb.button(text=t("btn_consultation"))
+    kb.button(text=t("btn_notifications"))
     kb.button(text=t("btn_contact"))
-    kb.adjust(2, 1)
+    kb.button(text=t("btn_help"))
+    kb.adjust(2)
     return kb.as_markup(resize_keyboard=True)
 
 
@@ -68,8 +71,10 @@ def property_card_kb(property_id: int, is_favorite: bool = False) -> InlineKeybo
         builder.button(text=t("btn_remove_favorite"), callback_data=f"prop_unfav:{property_id}")
     else:
         builder.button(text=t("btn_save_property"), callback_data=f"prop_fav:{property_id}")
+    builder.button(text=t("btn_ai_ask"), callback_data=f"ai_consult:{property_id}")
+    builder.button(text=t("btn_mortgage"), callback_data=f"mortgage:{property_id}")
     builder.button(text=t("btn_share"), switch_inline_query=f"property_{property_id}")
-    builder.adjust(2, 1)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 

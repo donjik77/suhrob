@@ -9,12 +9,15 @@ TEXTS = {
         "yes": "✅ Ha",
         "no": "❌ Yo'q",
         # Start / welcome
-        "welcome": "Assalomu alaykum, {name}! 👋\n\nSuhrob HOUSE botiga xush kelibsiz.\nMen sizga mukammal uy topishda yordam beraman.\n\nBoshlash uchun pastdagi tugmani bosing 👇",
+        "welcome": "🏠 Assalomu alaykum, <b>{name}</b>!\n\nSuhrob HOUSE botiga xush kelibsiz.\nMen sizga mukammal uy topishda yordam beraman.\n\nQanday boshlamoqchisiz? 👇",
         "main_menu": "Asosiy menyu",
         # Client main menu buttons
-        "btn_search": "🔍 Uy qidirish",
-        "btn_favorites": "⭐ Saralangan",
-        "btn_contact": "📞 Aloqa",
+        "btn_search": "🔵 🔍 Uy qidirish",
+        "btn_favorites": "🟣 ⭐ Saralangan",
+        "btn_contact": "🔵 📞 Aloqa",
+        "btn_consultation": "🟢 💬 Konsultatsiya",
+        "btn_notifications": "🟡 🔔 Bildirishnomalar",
+        "btn_help": "🔵 ℹ️ Yordam",
         # Search flow
         "search_type": "Qanday uy qidiryapsiz?",
         "type_apartment": "🏢 Kvartira",
@@ -44,24 +47,39 @@ TEXTS = {
         "btn_notify_new": "🔔 Yangi chiqsa, xabar bering",
         # Property card
         "property_card": (
-            "🏠 {title}\n\n"
-            "📍 Manzil: {district}{address}\n"
-            "💰 Narxi: ${price_usd} (~{price_uzs:,} so'm)\n"
-            "🚪 Xonalar: {rooms}\n"
+            "🏠 <b>{title}</b>\n\n"
+            "📍 <b>Manzil:</b> {district}{address}\n"
+            "💰 <b>Narxi:</b> ${price_usd} (~{price_uzs:,} so'm)\n"
+            "🚪 <b>Xonalar:</b> {rooms}\n"
             "{floor_info}"
             "{area_info}"
-            "\n📝 Tavsif:\n{description}\n\n"
-            "👤 Agent: {agent_name}"
+            "{features}"
+            "📝 <b>Tavsif:</b>\n{description}\n\n"
+            "👤 <b>Agent:</b> {agent_name}\n"
+            "━━━━━━━━━━━━"
         ),
         "floor_info": "🏢 Qavat: {floor}/{total_floors}\n",
         "area_info": "📐 Maydoni: {area} m²\n",
-        "btn_contact_agent": "📞 Bog'lanish",
-        "btn_save_property": "⭐ Saqlash",
-        "btn_share": "📤 Ulashish",
+        "btn_contact_agent": "🟢 📞 Bog'lanish",
+        "btn_save_property": "🟣 ⭐ Saqlash",
+        "btn_share": "🔵 📤 Ulashish",
+        "btn_ai_ask": "🟢 💬 Savol berish (AI)",
+        "btn_mortgage": "🟠 💰 Ipoteka kalkulyatori",
         "btn_remove_favorite": "💔 O'chirish",
         # Agent contact
         "agent_contact": "📞 Agent ma'lumotlari:\n\nIsm: {name}\nTelefon: {phone}\nTelegram: {username}",
         "agent_notify_new_client": "💬 Yangi mijoz: {client_name}\nQiziqdi: {property_title}",
+        "hot_lead_notify": (
+            "🔥 <b>Yangi qaynoq mijoz!</b>\n\n"
+            "👤 {client_name}\n"
+            "📊 Sifat: {score}/100\n\n"
+            "💰 Byudjet: {budget}\n"
+            "📍 Tuman: {districts}\n"
+            "🚪 Xonalar: {rooms}\n"
+            "⏱ Muddat: {timeline}\n"
+            "💳 To'lov: {payment_method}\n\n"
+            "📝 AI xulosasi:\n{summary}"
+        ),
         # Favorites
         "favorites_empty": "⭐ Saralanganlar bo'sh.\n\nUy qidirish orqali sevimli uylarni saqlang.",
         "favorites_title": "⭐ Saralangan uylar ({count} ta):",
@@ -73,22 +91,25 @@ TEXTS = {
         "service_blocked_agent": "🔒 Obuna to'lovi kerak. Direktor bilan bog'laning.",
         # Agent main menu
         "agent_menu_welcome": "👋 Salom, {name}!\n\nSizning panelingiz:",
-        "btn_add_property": "➕ Yangi uy qo'shish",
+        "btn_add_property": "🟢 ➕ Yangi uy qo'shish",
 
-        "btn_my_properties": "📋 Mening uylarim",
-        "btn_scheduled_posts": "📅 Rejalashtirilgan postlar",
-        "btn_stats": "📊 Statistika",
-        "btn_settings": "⚙️ Sozlamalar",
+        "btn_my_properties": "🔵 📋 Mening uylarim",
+        "btn_scheduled_posts": "🟡 📅 Rejalashtirilgan postlar",
+        "btn_stats": "🔵 📊 Statistika",
+        "btn_settings": "🔵 ⚙️ Sozlamalar",
+        "btn_my_clients": "🔥 Mening mijozlarim",
+        "btn_instagram": "🟣 📷 Instagram ulash",
         # Director main menu additions
-        "btn_agents_management": "👥 Agentlar boshqaruvi",
-        "btn_all_properties": "🏢 Barcha uylar",
-        "btn_subscription": "💳 Obuna holati",
-        "btn_full_stats": "📈 To'liq statistika",
+        "btn_agents_management": "🔵 👥 Agentlar boshqaruvi",
+        "btn_all_properties": "🔵 🏢 Barcha uylar",
+        "btn_subscription": "🟠 💳 Obuna holati",
+        "btn_full_stats": "🔵 📈 To'liq statistika",
+        "btn_my_profile": "🟠 👤 Mening profilim",
         # Developer main menu additions
-        "btn_issue_invoice": "💰 Hisob chiqarish",
-        "btn_confirm_payments": "✅ To'lovlarni tasdiqlash",
-        "btn_companies": "🏢 Kompaniyalar",
-        "btn_system_settings": "⚙️ Tizim sozlamalari",
+        "btn_issue_invoice": "🟠 💰 Hisob chiqarish",
+        "btn_confirm_payments": "🟢 ✅ To'lovlarni tasdiqlash",
+        "btn_companies": "🔵 🏢 Kompaniyalar",
+        "btn_system_settings": "🔵 ⚙️ Tizim sozlamalari",
         # Agent personal settings
         "agent_settings_menu": "⚙️ Sozlamalar\n\nIsm: {name}\nTelefon: {phone}\n\nNimani o'zgartirmoqchisiz?",
         "agent_settings_name_prompt": "Yangi ismingizni kiriting (mijozlarga ko'rsatiladi):",
@@ -238,8 +259,6 @@ TEXTS = {
             "❌ Chiqish uchun /stop yozing."
         ),
         "ai_limit_reached": "⚠️ Bugungi AI so'rovlar limitiga yetdingiz. Ertaga urinib ko'ring.",
-        # Mortgage calculator
-        "btn_mortgage": "💰 Ipoteka kalkulyatori",
         # Client alerts
         "btn_notify_alert": "🔔 Yangi chiqsa, xabar bering",
         "alert_subscribed": "🔔 Obuna faollashtirildi! Yangi mos obyekt chiqsa xabar beramiz.",
@@ -249,22 +268,86 @@ TEXTS = {
         "btn_topup_balance": "💳 Balansni to'ldirish",
         "btn_balance_history": "📜 Tranzaksiyalar tarixi",
         "btn_dashboard": "📊 To'liq statistika (Dashboard)",
-        # Agent CRM
-        "btn_my_clients": "👥 Mening mijozlarim",
-        # Agent Instagram
-        "btn_instagram": "📷 Instagram ulash",
-        # Developer companies
-        "btn_companies": "🏢 Kompaniyalar",
         "dev_new_topup": "💰 <b>Yangi balans to'ldirish</b>\n\nKompaniya: {company}\nDirektor: {name}\nSumma: ${amount}\nUsul: {method}",
+        # Add property — new step-by-step FSM
+        "ap_step_type":     "🏠 Mulk turini tanlang:",
+        "ap_step_district": "📍 Tumanni tanlang:",
+        "ap_enter_district": "Tuman nomini kiriting:\n(Misol: Mirzo Ulug'bek)",
+        "ap_step_address":  "🏠 Aniq manzilni kiriting:\n(Ko'cha, uy raqami)\n\n<i>Ixtiyoriy — o'tkazib yuborish mumkin</i>",
+        "ap_step_rooms":    "🚪 Necha xonali uy kerak?",
+        "ap_step_floor":    "🏢 Qavat raqamini kiriting:\n\n<i>Ixtiyoriy — /skip yozing</i>",
+        "ap_step_total_floors": "🏢 Jami qavatlar sonini kiriting:\n\n<i>Ixtiyoriy — /skip yozing</i>",
+        "ap_step_area":     "📐 Maydonni tanlang (m²):",
+        "ap_enter_area":    "📐 Maydonni m² da kiriting (raqam):\nMisol: 75",
+        "ap_step_price":    "💰 Narxni tanlang (USD):",
+        "ap_enter_price":   "💰 Narxni USD da kiriting (faqat raqam):\nMisol: 65000",
+        "ap_step_features": (
+            "✨ <b>Qo'shimcha xususiyatlar</b>\n\n"
+            "Mavjud xususiyatlarni tanlang (bir nechtasini).\n"
+            "Tanlash/bekor qilish uchun tugmani bosing.\n\n"
+            "Tayyor bo'lgach 🟢 Tayyor tugmasini bosing."
+        ),
+        "ap_step_keywords": (
+            "💬 Qo'shimcha ma'lumot kiriting:\n"
+            "<i>(masalan: yangi qurilgan, metro yaqin, ta'mir kerak)</i>\n\n"
+            "Ixtiyoriy — o'tkazib yuborish mumkin."
+        ),
+        "ap_step_media": (
+            "📸 <b>Rasm va videolarni yuklang</b>\n\n"
+            "• Kamida 1 ta rasm (maksimal 10)\n"
+            "• Video ixtiyoriy (maksimal 2)\n\n"
+            "Hammasi tayyor bo'lgach 🟢 Tayyor tugmasini bosing."
+        ),
+        "ap_media_received":    "📸 {count} ta rasm qabul qilindi.",
+        "ap_video_received":    "📹 {count} ta video qabul qilindi.",
+        "ap_media_limit_photo": "❌ Maksimal 10 ta rasm. Tayyor tugmasini bosing.",
+        "ap_media_limit_video": "❌ Maksimal 2 ta video.",
+        "ap_media_need_one":    "❌ Kamida 1 ta rasm yuboring.",
+        "ap_processing":        "🤖 AI ma'lumotlarni qayta ishlayapti...\nBir daqiqa kuting.",
+        "ap_preview_header":    "📋 <b>Tekshirib ko'ring:</b>\n\n",
+        "ap_desc_edit_prompt":  "✏️ Yangi tavsifni kiriting:",
+        "ap_step_pub_date":     "📅 Qaysi kuni e'lon qilinsin?",
+        "ap_step_pub_time":     "🕐 Soatni tanlang:",
+        "ap_enter_pub_date":    "Sanani kiriting (format: DD.MM.YYYY):\nMisol: 25.06.2026",
+        "ap_enter_pub_time":    "Vaqtni kiriting (format: HH:MM):\nMisol: 14:30",
+        "ap_date_error":        "❌ Noto'g'ri format. Misol: 25.06.2026",
+        "ap_time_error":        "❌ Noto'g'ri format. Misol: 14:30",
+        "ap_scheduled_ok":      "⏰ {dt} da e'lon qilinishi rejalashtirildi.",
+        "ap_saved_only":        "💾 Faqat bazaga saqlandi.",
+        "ap_cancelled":         "❌ Bekor qilindi.",
+        "ap_price_error":       "❌ Raqam kiriting. Misol: 65000",
+        "ap_rooms_error":       "❌ Raqam kiriting.",
+        "ap_floor_error":       "❌ Raqam kiriting yoki /skip yozing.",
+        # Follow-up messages
+        "follow_up_day3": (
+            "Salom, {name}! 👋\n\n"
+            "3 kun oldin siz {district} tumanida uy qidiruvda edingiz.\n"
+            "Yangi variantlar paydo bo'ldi! Ko'rasizmi?"
+        ),
+        "follow_up_day7": (
+            "{name}, esingizdami? 🏠\n\n"
+            "Sizga yoqishi mumkin bo'lgan ${budget} dagi yangi variantlar bor."
+        ),
+        "follow_up_day14": (
+            "{name}, oxirgi marta yozaman 😊\n\n"
+            "Agar uy hali kerak bo'lsa — biz tayyor.\n"
+            "Yo'q bo'lsa — sizga omad tilaymiz!"
+        ),
+        "btn_follow_up_yes": "🟢 ✅ Ha, ko'rsating",
+        "btn_follow_up_no": "🔴 ❌ Hozir kerak emas",
+        "btn_follow_up_unsub": "🔕 Bunday bildirishnomalarni yopish",
+        "btn_follow_up_looking": "🟢 Hali izlayman",
+        "btn_follow_up_found": "🔴 Topdim, rahmat",
         # Channel post format
         "channel_post": (
-            "{type_icon} {prop_type} | {district}\n\n"
-            "💰 ${price_usd} (~{price_uzs:,} so'm)\n"
+            "{type_icon} <b>{prop_type} | {district}</b>\n\n"
+            "💰 <b>${price_usd}</b> (~{price_uzs:,} so'm)\n"
             "🚪 {rooms} xona  •  {floor_info}  •  📐 {area} m²\n"
             "{address_line}"
-            "\n{description}\n\n"
-            "📞 Aloqa: {agent_phone}\n"
-            "👤 Agent: @{agent_username}\n\n"
+            "\n{features_line}"
+            "{description}\n\n"
+            "📞 <b>Aloqa:</b> {agent_phone}\n"
+            "👤 Agent: {agent_username}\n\n"
             "{hashtags}"
         ),
     }

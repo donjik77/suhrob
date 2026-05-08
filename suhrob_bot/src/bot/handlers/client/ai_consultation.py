@@ -141,7 +141,7 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
 
         # Auto-assign hot lead to agents
         if qualification.get("qualification_score", 0) >= 70:
-            await _maybe_assign_hot_lead(session, db_user, qualification)
+            await _maybe_assign_hot_lead(session, db_user, qualification, message.bot)
 
     await state.update_data(msg_count=msg_count + 1)
     await message.answer(reply)
@@ -221,16 +221,11 @@ async def _upsert_client_profile(session: AsyncSession, user_id: int, data: dict
     await session.commit()
 
 
-async def _maybe_assign_hot_lead(session: AsyncSession, client: User, qualification: dict) -> None:
-    """Assign hot lead to a free agent and notify them."""
-    if not client.company_id:
-        return
-
-    # Check if already assigned
+async def _maybe_assign_hot_lead(session: AsyncSession, client: User, qualification: dict, bot) -> None:
+    from sqlalchemy import select as _select
     existing = (
         await session.execute(
-            select(LeadAssignment)
-            .where(
+            _select(LeadAssignment).where(
                 LeadAssignment.client_user_id == client.id,
                 LeadAssignment.status == LeadStatus.new,
             )
@@ -239,11 +234,10 @@ async def _maybe_assign_hot_lead(session: AsyncSession, client: User, qualificat
     if existing:
         return
 
-    # Find an agent in the same company
     from src.db.models import UserRole as UR
     agent = (
         await session.execute(
-            select(User).where(
+            _select(User).where(
                 User.company_id == client.company_id,
                 User.role == UR.agent,
                 User.is_blocked == False,
@@ -262,29 +256,28 @@ async def _maybe_assign_hot_lead(session: AsyncSession, client: User, qualificat
     session.add(assignment)
     await session.commit()
 
-    # Notify agent
     score = qualification.get("qualification_score", 0)
-    budget = f"${qualification.get('budget_min_usd', '?')}-${qualification.get('budget_max_usd', '?')}"
+    budget_min = qualification.get("budget_min_usd")
+    budget_max = qualification.get("budget_max_usd")
+    budget = f"${budget_min}-${budget_max}" if budget_min and budget_max else "—"
     districts = ", ".join(qualification.get("preferred_districts") or []) or "—"
-    msg = (
-        f"🔥 <b>Yangi qaynoq mijoz!</b>\n\n"
-        f"👤 {client.full_name or client.username or 'Anonim'}\n"
-        f"⭐ Sifat: {score}/100\n\n"
-        f"💰 Byudjet: {budget}\n"
-        f"📍 Tuman: {districts}\n"
-        f"💳 To'lov: {qualification.get('payment_method') or '—'}\n"
-        f"⏱ Muddat: {qualification.get('purchase_timeline') or '—'}\n\n"
-        f"📝 Xulosa:\n{qualification.get('summary') or '—'}"
+    rooms = ", ".join(str(r) for r in (qualification.get("preferred_rooms") or [])) or "—"
+
+    from locales.uz import t
+    msg = t(
+        "hot_lead_notify",
+        client_name=client.full_name or client.username or "Anonim",
+        score=score,
+        budget=budget,
+        districts=districts,
+        rooms=rooms,
+        timeline=qualification.get("purchase_timeline") or "—",
+        payment_method=qualification.get("payment_method") or "—",
+        summary=qualification.get("summary") or "—",
     )
+
     try:
-        from aiogram import Bot
-        # We don't have a direct bot reference here; notify via notification service
-        import structlog
-        structlog.get_logger().info(
-            "hot_lead_assigned",
-            client_id=client.id,
-            agent_id=agent.id,
-            score=score,
-        )
+        await bot.send_message(agent.telegram_user_id, msg, parse_mode="HTML")
     except Exception:
-        pass
+        import structlog
+        structlog.get_logger().warning("hot_lead_notify_failed", agent_id=agent.id)

@@ -13,6 +13,9 @@ def setup_scheduler(bot) -> AsyncIOScheduler:
         job_check_reminders,
         job_expire_subscriptions,
         job_publish_scheduled_posts,
+        job_send_follow_ups,
+        job_cleanup_old_notifications,
+        job_send_property_alerts,
     )
 
     # Check for 3-day reminders every hour
@@ -39,6 +42,33 @@ def setup_scheduler(bot) -> AsyncIOScheduler:
         trigger=CronTrigger(minute="*/5"),
         kwargs={"bot": bot},
         id="publish_scheduled_posts",
+        replace_existing=True,
+    )
+
+    # Send follow-up messages to clients daily at 10:00
+    scheduler.add_job(
+        job_send_follow_ups,
+        trigger=CronTrigger(hour=10, minute=0),
+        kwargs={"bot": bot},
+        id="send_follow_ups",
+        replace_existing=True,
+    )
+
+    # Cleanup old notifications daily at 03:00
+    scheduler.add_job(
+        job_cleanup_old_notifications,
+        trigger=CronTrigger(hour=3, minute=0),
+        kwargs={"bot": bot},
+        id="cleanup_notifications",
+        replace_existing=True,
+    )
+
+    # Check for new properties matching client alerts every 2 hours
+    scheduler.add_job(
+        job_send_property_alerts,
+        trigger=CronTrigger(minute=30, hour="*/2"),
+        kwargs={"bot": bot},
+        id="send_property_alerts",
         replace_existing=True,
     )
 

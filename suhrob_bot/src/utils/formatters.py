@@ -25,6 +25,19 @@ PRICE_RANGES = {
     (200_000, None): "$200K+",
 }
 
+FEATURE_LABELS: dict[str, str] = {
+    "repair":          "🚿 Ta'mirli",
+    "parking":         "🚗 Avtoturargoh",
+    "garden":          "🌳 Hovli/Bog'",
+    "pool":            "🏊 Basseyn",
+    "ac":              "🌡 Konditsioner",
+    "furniture":       "🪑 Mebelli",
+    "elevator":        "🛗 Lift",
+    "central_heating": "🔥 Markaziy isitish",
+    "internet":        "🌐 Internet",
+    "security":        "🛡 Xavfsizlik",
+}
+
 
 def format_property_card(prop: Property, rate: float) -> str:
     price_uzs = usd_to_uzs(prop.price_usd, rate)
@@ -44,6 +57,11 @@ def format_property_card(prop: Property, rate: float) -> str:
     if prop.agent:
         agent_name = prop.agent.full_name or prop.agent.username or str(prop.agent.telegram_user_id)
 
+    features_block = ""
+    if prop.features:
+        lines = "\n".join(f"• {FEATURE_LABELS.get(f, f)}" for f in prop.features)
+        features_block = f"\n✨ <b>Xususiyatlari:</b>\n{lines}\n"
+
     desc = prop.description or ""
 
     return t(
@@ -56,6 +74,7 @@ def format_property_card(prop: Property, rate: float) -> str:
         rooms=prop.rooms,
         floor_info=floor_info,
         area_info=area_info,
+        features=features_block,
         description=desc,
         agent_name=agent_name,
     )
@@ -80,6 +99,10 @@ def format_channel_post(prop: Property, rate: float) -> str:
     agent_phone = agent.phone or "—" if agent else "—"
     agent_username = f"@{agent.username}" if agent and agent.username else (agent.full_name if agent else "—")
 
+    features_line = ""
+    if prop.features:
+        features_line = "✨ " + "  •  ".join(FEATURE_LABELS.get(f, f) for f in prop.features) + "\n\n"
+
     desc = (prop.description or "")[:500]
 
     district_tag = "#" + prop.location_district.replace(" ", "_").replace("'", "").replace("'", "")
@@ -99,6 +122,7 @@ def format_channel_post(prop: Property, rate: float) -> str:
         floor_info=floor_info,
         area=area,
         address_line=address_line,
+        features_line=features_line,
         description=desc,
         agent_phone=agent_phone,
         agent_username=agent_username,
