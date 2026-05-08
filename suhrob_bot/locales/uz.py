@@ -98,6 +98,7 @@ TEXTS = {
         "btn_stats": "🔵 📊 Statistika",
         "btn_settings": "🔵 ⚙️ Sozlamalar",
         "btn_my_clients": "🔥 Mening mijozlarim",
+        "btn_all_clients": "🔥 Barcha mijozlar",
         "btn_instagram": "🟣 📷 Instagram ulash",
         # Director main menu additions
         "btn_agents_management": "🔵 👥 Agentlar boshqaruvi",

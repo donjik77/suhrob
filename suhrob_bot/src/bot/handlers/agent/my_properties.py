@@ -5,6 +5,10 @@ from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from src.db.models import User, UserRole, PropertyStatus, PropertyType, Property
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
@@ -39,6 +43,46 @@ def _owns_property(prop: "Property", db_user: "User") -> bool:
     if db_user.role == UserRole.director:
         return prop.company_id == db_user.company_id
     return prop.agent_id == db_user.id
+
+
+async def get_property_for_agent(
+    property_id: int,
+    agent: User,
+    session: AsyncSession,
+) -> Property | None:
+    """Return a property only when the current agent owns it."""
+    result = await session.execute(
+        select(Property)
+        .where(
+            Property.id == property_id,
+            Property.agent_id == agent.id,
+        )
+        .options(
+            selectinload(Property.media),
+            selectinload(Property.agent),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_property_for_actor(
+    property_id: int,
+    db_user: User,
+    session: AsyncSession,
+) -> Property | None:
+    if db_user.role == UserRole.agent:
+        return await get_property_for_agent(property_id, db_user, session)
+
+    result = await session.execute(
+        select(Property)
+        .where(Property.id == property_id)
+        .options(
+            selectinload(Property.media),
+            selectinload(Property.agent),
+        )
+    )
+    prop = result.scalar_one_or_none()
+    return prop if prop and _owns_property(prop, db_user) else None
 
 
 router = Router()
@@ -120,15 +164,10 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
     property_id = int(parts[2])
 
     async with AsyncSessionFactory() as session:
-        repo = PropertyRepository(session)
-        prop = await repo.get_by_id(property_id)
+        prop = await get_property_for_actor(property_id, db_user, session)
 
         if not prop:
-            await callback.answer("Uy topilmadi", show_alert=True)
-            return
-
-        if action != "view" and not _owns_property(prop, db_user):
-            await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+            await callback.answer("❌ Bunday obyekt topilmadi yoki sizniki emas", show_alert=True)
             return
 
         if action == "view":
@@ -170,9 +209,15 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
 # ─── Edit existing property ───────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("edit_prop_field:"))
-async def start_edit_field(callback: CallbackQuery, state: FSMContext):
+async def start_edit_field(callback: CallbackQuery, state: FSMContext, db_user: User):
     _, prop_id_str, field = callback.data.split(":", 2)
     prop_id = int(prop_id_str)
+
+    async with AsyncSessionFactory() as session:
+        prop = await get_property_for_actor(prop_id, db_user, session)
+        if not prop:
+            await callback.answer("❌ Bunday obyekt topilmadi yoki sizniki emas", show_alert=True)
+            return
 
     if field == "property_type":
         await callback.message.answer(
@@ -194,10 +239,9 @@ async def save_prop_type(callback: CallbackQuery, db_user: User):
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import update as sa_update
-        repo = PropertyRepository(session)
-        prop = await repo.get_by_id(prop_id)
-        if not prop or not _owns_property(prop, db_user):
-            await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+        prop = await get_property_for_actor(prop_id, db_user, session)
+        if not prop:
+            await callback.answer("❌ Bunday obyekt topilmadi yoki sizniki emas", show_alert=True)
             return
         await session.execute(
             sa_update(Property)
@@ -244,10 +288,9 @@ async def save_edit_field_value(message: Message, state: FSMContext, db_user: Us
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import update as sa_update
-        repo = PropertyRepository(session)
-        prop = await repo.get_by_id(prop_id)
-        if not prop or not _owns_property(prop, db_user):
-            await message.answer("❌ Bu sizning obyektingiz emas")
+        prop = await get_property_for_actor(prop_id, db_user, session)
+        if not prop:
+            await message.answer("❌ Bunday obyekt topilmadi yoki sizniki emas")
             await state.clear()
             return
         await session.execute(
@@ -267,9 +310,9 @@ async def set_property_status(callback: CallbackQuery, db_user: User):
 
     async with AsyncSessionFactory() as session:
         repo = PropertyRepository(session)
-        prop = await repo.get_by_id(property_id)
-        if not prop or not _owns_property(prop, db_user):
-            await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+        prop = await get_property_for_actor(property_id, db_user, session)
+        if not prop:
+            await callback.answer("❌ Bunday obyekt topilmadi yoki sizniki emas", show_alert=True)
             return
         await repo.update_status(property_id, new_status)
 
@@ -283,14 +326,12 @@ async def confirm_delete(callback: CallbackQuery, db_user: User):
     property_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
-        repo = PropertyRepository(session)
-        prop = await repo.get_by_id(property_id)
-        if prop:
-            if not _owns_property(prop, db_user):
-                await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
-                return
-            await session.delete(prop)
-            await session.commit()
+        prop = await get_property_for_actor(property_id, db_user, session)
+        if not prop:
+            await callback.answer("❌ Bunday obyekt topilmadi yoki sizniki emas", show_alert=True)
+            return
+        await session.delete(prop)
+        await session.commit()
 
     await callback.answer(t("prop_deleted"), show_alert=True)
     await callback.message.delete()

@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,13 @@ class SettingsRepository:
         try:
             return float(val) if val else default
         except (ValueError, TypeError):
+            return default
+
+    async def get_decimal(self, key: str, default: Decimal = Decimal("0")) -> Decimal:
+        val = await self.get(key)
+        try:
+            return Decimal(val) if val else default
+        except (InvalidOperation, TypeError):
             return default
 
     async def set(self, key: str, value: str, updated_by: Optional[int] = None) -> None:

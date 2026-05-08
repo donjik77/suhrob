@@ -25,23 +25,30 @@ FEATURES = [
 def agent_menu_kb(role: UserRole) -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardBuilder()
     kb.button(text=t("btn_add_property"))
-    kb.button(text=t("btn_my_properties"))
-    kb.button(text=t("btn_my_clients"))
-    kb.button(text=t("btn_scheduled_posts"))
-    kb.button(text=t("btn_stats"))
-    kb.button(text=t("btn_settings"))
-    kb.button(text=t("btn_instagram"))
-    kb.button(text=t("btn_shared_profile"))
 
     if role in (UserRole.director, UserRole.developer):
+        kb.button(text=t("btn_all_properties"))
+        kb.button(text=t("btn_all_clients"))
         kb.button(text=t("btn_agents_management"))
         kb.button(text=t("btn_agent_rating"))
-        kb.button(text=t("btn_all_properties"))
-        kb.button(text=t("btn_my_profile"))
+        kb.button(text=t("btn_scheduled_posts"))
         kb.button(text=t("btn_full_stats"))
+        kb.button(text=t("btn_my_profile"))
         kb.button(text=t("btn_subscription"))
+        kb.button(text=t("btn_instagram"))
+        kb.button(text=t("btn_settings"))
+        kb.button(text=t("btn_help"))
+    else:
+        kb.button(text=t("btn_my_properties"))
+        kb.button(text=t("btn_my_clients"))
+        kb.button(text=t("btn_scheduled_posts"))
+        kb.button(text=t("btn_stats"))
+        kb.button(text=t("btn_shared_profile"))
+        kb.button(text=t("btn_instagram"))
+        kb.button(text=t("btn_help"))
 
     if role == UserRole.developer:
+        # Developer keeps operational shortcuts after the director menu.
         kb.button(text=t("btn_issue_invoice"))
         kb.button(text=t("btn_confirm_payments"))
         kb.button(text=t("btn_companies"))

@@ -138,9 +138,13 @@ async def cmd_set_role(message: Message):
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
-        result = await session.execute(
-            select(User).where(User.telegram_user_id == tg_id)
-        )
+        stmt = select(User).where(User.telegram_user_id == tg_id)
+        if company_id is None:
+            stmt = stmt.where(User.company_id.is_(None))
+        else:
+            stmt = stmt.where(User.company_id == company_id)
+
+        result = await session.execute(stmt)
         user = result.scalar_one_or_none()
 
         if not user:

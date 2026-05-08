@@ -4,6 +4,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from src.db.models import Company
+from src.bot.handlers.client.property_access import get_active_property_for_client
+
 router = Router()
 
 
@@ -47,8 +50,15 @@ def _term_kb(property_id: int, dp: int) -> InlineKeyboardMarkup:
 
 
 @router.callback_query(F.data.startswith("mortgage:"))
-async def show_down_payment(callback: CallbackQuery):
+async def show_down_payment(callback: CallbackQuery, company: Company):
     property_id = int(callback.data.split(":")[1])
+    from src.db.session import AsyncSessionFactory
+    async with AsyncSessionFactory() as session:
+        prop = await get_active_property_for_client(property_id, company, session)
+    if not prop:
+        await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
+        return
+
     await _edit_or_answer(
         callback,
         "💰 <b>Ipoteka kalkulyatori</b>\n\nBoshlang'ich to'lov necha foiz?",
@@ -94,7 +104,7 @@ async def select_down_payment(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("mort_term:"))
-async def show_calculation(callback: CallbackQuery):
+async def show_calculation(callback: CallbackQuery, company: Company):
     parts = callback.data.split(":")
     property_id = int(parts[1])
     dp_pct = int(parts[2])
@@ -102,13 +112,11 @@ async def show_calculation(callback: CallbackQuery):
 
     # Fetch property price
     from src.db.session import AsyncSessionFactory
-    from src.db.models import Property
-    from sqlalchemy import select
     async with AsyncSessionFactory() as session:
-        prop = (await session.execute(select(Property).where(Property.id == property_id))).scalar_one_or_none()
+        prop = await get_active_property_for_client(property_id, company, session)
 
     if not prop:
-        await callback.answer("Obyekt topilmadi.", show_alert=True)
+        await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
         return
 
     price = float(prop.price_usd)

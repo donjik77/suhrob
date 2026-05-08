@@ -25,6 +25,9 @@ router = Router()
 
 @router.message(F.text == "🔵 🔍 Uy qidirish")
 async def start_search(message: Message, state: FSMContext, db_user: User, company: Company):
+    if company is None:
+        await message.answer("Kompaniya topilmadi.")
+        return
     await state.clear()
     await state.update_data(company_id=company.id)
     await state.set_state(SearchStates.choosing_type)
@@ -32,13 +35,17 @@ async def start_search(message: Message, state: FSMContext, db_user: User, compa
 
 
 @router.callback_query(F.data.startswith("search_type:"), SearchStates.choosing_type)
-async def choose_type(callback: CallbackQuery, state: FSMContext):
+async def choose_type(callback: CallbackQuery, state: FSMContext, company: Company):
     ptype = callback.data.split(":")[1]
     await state.update_data(property_type=ptype)
     await state.set_state(SearchStates.choosing_district)
 
     data = await state.get_data()
-    company_id = data.get("company_id")
+    company_id = data.get("company_id") or (company.id if company else None)
+    if company_id is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
+    await state.update_data(company_id=company_id)
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
@@ -124,6 +131,10 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
     data = await state.get_data()
 
     company_id: int = data.get("company_id")
+    if company_id is None:
+        await message_or_obj.answer("Kompaniya topilmadi.")
+        await state.clear()
+        return
     district: Optional[str] = data.get("district")
     rooms: Optional[int] = data.get("rooms")
     price_min = Decimal(data["price_min"]) if data.get("price_min") else None
@@ -156,7 +167,7 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
         async with AsyncSessionFactory() as inc_session:
             await inc_session.execute(
                 update(Property)
-                .where(Property.id.in_(prop_ids))
+                .where(Property.id.in_(prop_ids), Property.company_id == company_id)
                 .values(views_count=Property.views_count + 1)
             )
             await inc_session.commit()
@@ -206,11 +217,15 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
 
 # Back navigation handlers
 @router.callback_query(F.data.startswith("search_back:"))
-async def search_back(callback: CallbackQuery, state: FSMContext):
+async def search_back(callback: CallbackQuery, state: FSMContext, company: Company):
     target = callback.data.split(":")[1]
 
     if target == "start":
         await state.clear()
+        if company is None:
+            await callback.answer("Kompaniya topilmadi.", show_alert=True)
+            return
+        await state.update_data(company_id=company.id)
         await callback.message.edit_text(t("search_type"), reply_markup=search_type_kb())
         await state.set_state(SearchStates.choosing_type)
     elif target == "type":
@@ -219,7 +234,11 @@ async def search_back(callback: CallbackQuery, state: FSMContext):
     elif target == "district":
         await state.set_state(SearchStates.choosing_district)
         back_data = await state.get_data()
-        back_company_id = back_data.get("company_id")
+        back_company_id = back_data.get("company_id") or (company.id if company else None)
+        if back_company_id is None:
+            await callback.answer("Kompaniya topilmadi.", show_alert=True)
+            return
+        await state.update_data(company_id=back_company_id)
         async with AsyncSessionFactory() as session:
             from sqlalchemy import select
             from src.db.models import Property, PropertyStatus
@@ -240,8 +259,12 @@ async def search_back(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "search_new")
-async def new_search(callback: CallbackQuery, state: FSMContext):
+async def new_search(callback: CallbackQuery, state: FSMContext, company: Company):
     await state.clear()
+    if company is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
+    await state.update_data(company_id=company.id)
     await state.set_state(SearchStates.choosing_type)
     await callback.message.answer(t("search_type"), reply_markup=search_type_kb())
 

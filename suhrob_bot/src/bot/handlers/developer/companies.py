@@ -31,6 +31,10 @@ class AddCompanyState(StatesGroup):
 
 @router.message(F.text == "🔵 🏢 Kompaniyalar")
 async def list_companies(message: Message):
+    await _show_companies_list(message, edit=False)
+
+
+async def _show_companies_list(event: Message, edit: bool = False) -> None:
     async with AsyncSessionFactory() as session:
         companies = (
             await session.execute(
@@ -39,7 +43,11 @@ async def list_companies(message: Message):
         ).scalars().all()
 
     if not companies:
-        await message.answer("Hozircha kompaniyalar yo'q.\n\n/add_company — yangi qo'shish")
+        text = "Hozircha kompaniyalar yo'q.\n\n/add_company — yangi qo'shish"
+        if edit:
+            await event.edit_text(text)
+        else:
+            await event.answer(text)
         return
 
     lines = [f"🏢 <b>Kompaniyalar</b> (jami: {len(companies)})\n"]
@@ -55,7 +63,10 @@ async def list_companies(message: Message):
         InlineKeyboardButton(text="➕ Yangi kompaniya", callback_data="company_add")
     ])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await message.answer("\n".join(lines), reply_markup=kb)
+    if edit:
+        await event.edit_text("\n".join(lines), reply_markup=kb)
+    else:
+        await event.answer("\n".join(lines), reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("company_detail:"))
@@ -136,8 +147,11 @@ async def company_detail(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "back_to_companies")
-async def back_to_companies(callback: CallbackQuery):
-    await list_companies.__wrapped__(callback.message) if hasattr(list_companies, "__wrapped__") else None
+async def back_to_companies(callback: CallbackQuery, db_user: User):
+    if db_user.role != UserRole.developer:
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+    await _show_companies_list(callback.message, edit=True)
     await callback.answer()
 
 
@@ -162,7 +176,10 @@ async def toggle_company(callback: CallbackQuery, db_user: User):
 
 
 @router.callback_query(F.data == "company_add")
-async def start_add_company(callback: CallbackQuery, state: FSMContext):
+async def start_add_company(callback: CallbackQuery, state: FSMContext, db_user: User):
+    if db_user.role != UserRole.developer:
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
     await state.set_state(AddCompanyState.company_name)
     await callback.message.edit_text(
         "🏢 <b>Yangi kompaniya qo'shish</b>\n\n"

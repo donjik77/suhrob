@@ -1,5 +1,5 @@
 import re as _re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -28,23 +28,21 @@ async def list_agents(message: Message, db_user: User):
 
     async with AsyncSessionFactory() as session:
         repo = UserRepository(session)
-        agents = await repo.get_company_users(db_user.company_id)
-
-    if not agents:
-        await message.answer("Kompaniyada agentlar yo'q.")
-        return
+        agents = await repo.get_company_users_by_role(db_user.company_id, UserRole.agent)
 
     builder = InlineKeyboardBuilder()
     lines = ["👥 Kompaniya agentlari:\n"]
-    for agent in agents:
-        if agent.role in (UserRole.agent, UserRole.director):
+    if not agents:
+        lines.append("Hozircha agentlar yo'q.")
+    else:
+        for agent in agents:
             name = agent.full_name or agent.username or str(agent.telegram_user_id)
-            role_label = "direktor" if agent.role == UserRole.director else "agent"
-            lines.append(f"• {name} ({role_label})")
+            lines.append(f"• {name} (agent)")
             builder.button(
                 text=f"⚙️ {name}",
                 callback_data=f"agent_manage:{agent.id}",
             )
+    builder.button(text="➕ Yangi agent qo'shish", callback_data="add_agent")
 
     builder.adjust(1)
     await message.answer("\n".join(lines), reply_markup=builder.as_markup())
@@ -60,6 +58,7 @@ async def manage_agent(callback: CallbackQuery, db_user: User):
             select(User).where(
                 User.id == agent_id,
                 User.company_id == db_user.company_id,
+                User.role == UserRole.agent,
             )
         )
         agent = result.scalar_one_or_none()
@@ -104,7 +103,13 @@ async def toggle_agent_block(callback: CallbackQuery, db_user: User):
             return
 
         await session.execute(
-            update(User).where(User.id == agent_id).values(is_blocked=blocked)
+            update(User)
+            .where(
+                User.id == agent_id,
+                User.company_id == db_user.company_id,
+                User.role == UserRole.agent,
+            )
+            .values(is_blocked=blocked)
         )
         await session.commit()
 
@@ -122,7 +127,10 @@ class AddAgentStates(StatesGroup):
 
 
 @router.callback_query(F.data == "add_agent")
-async def start_add_agent(callback: CallbackQuery, state: FSMContext):
+async def start_add_agent(callback: CallbackQuery, state: FSMContext, db_user: User):
+    if db_user.company_id is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
     await callback.message.answer(
         "➕ <b>Yangi agent qo'shish</b>\n\n"
         "1/3. Agentning to'liq ism va familiyasini kiriting:",
@@ -159,6 +167,11 @@ async def add_agent_phone(message: Message, state: FSMContext):
 
 @router.message(StateFilter(AddAgentStates.waiting_telegram))
 async def add_agent_telegram(message: Message, state: FSMContext, db_user: User, bot):
+    if db_user.company_id is None:
+        await message.answer("Kompaniya topilmadi.")
+        await state.clear()
+        return
+
     text = message.text.strip()
     telegram_user_id = None
     username = None
@@ -176,10 +189,26 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
     async with AsyncSessionFactory() as session:
         if telegram_user_id:
             existing = await session.execute(
-                sa_select(User).where(User.telegram_user_id == telegram_user_id)
+                sa_select(User).where(
+                    User.telegram_user_id == telegram_user_id,
+                    User.company_id == db_user.company_id,
+                )
             )
             if existing.scalar_one_or_none():
-                await message.answer("❌ Bu Telegram ID allaqachon ro'yxatda bor")
+                await message.answer("❌ Bu Telegram ID kompaniyangizda allaqachon bor")
+                await state.clear()
+                return
+        elif username:
+            existing_pending = await session.execute(
+                sa_select(User).where(
+                    User.telegram_user_id == 0,
+                    func.lower(User.username) == username.lower(),
+                    User.company_id == db_user.company_id,
+                    User.role == UserRole.agent,
+                )
+            )
+            if existing_pending.scalar_one_or_none():
+                await message.answer("❌ Bu username bo'yicha agent allaqachon kutilmoqda")
                 await state.clear()
                 return
 
@@ -232,7 +261,7 @@ async def agents_rating(message: Message, db_user: User):
         await message.answer("Kompaniya topilmadi.")
         return
 
-    period_start = datetime.utcnow() - timedelta(days=30)
+    period_start = datetime.now(timezone.utc) - timedelta(days=30)
 
     async with AsyncSessionFactory() as session:
         stmt = (

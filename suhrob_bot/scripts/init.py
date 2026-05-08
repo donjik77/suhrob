@@ -29,7 +29,10 @@ async def main():
         # Create developer user
         from sqlalchemy import select
         existing_dev = await session.execute(
-            select(User).where(User.telegram_user_id == dev_tg_id)
+            select(User).where(
+                User.telegram_user_id == dev_tg_id,
+                User.company_id.is_(None),
+            )
         )
         dev_user = existing_dev.scalar_one_or_none()
         if not dev_user:
@@ -67,7 +70,10 @@ async def main():
         if director_tg_id_str:
             director_tg_id = int(director_tg_id_str)
             existing_dir = await session.execute(
-                select(User).where(User.telegram_user_id == director_tg_id)
+                select(User).where(
+                    User.telegram_user_id == director_tg_id,
+                    User.company_id == company.id,
+                )
             )
             director = existing_dir.scalar_one_or_none()
             if not director:

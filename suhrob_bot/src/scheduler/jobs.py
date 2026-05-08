@@ -2,6 +2,7 @@ from datetime import datetime
 
 import structlog
 from aiogram import Bot
+from sqlalchemy import select
 
 from src.db.session import AsyncSessionFactory
 from src.services.notification_service import NotificationService
@@ -28,7 +29,6 @@ async def job_expire_subscriptions(bot: Bot) -> None:
 
 async def job_publish_scheduled_posts(bot: Bot) -> None:
     logger.info("scheduler_job_start", job="publish_scheduled_posts")
-    from sqlalchemy import select
     from src.db.models import ScheduledPost, ScheduledPostStatus
     from src.services.publisher_service import PublisherService
 
@@ -52,6 +52,10 @@ async def job_publish_scheduled_posts(bot: Bot) -> None:
                 post.status = ScheduledPostStatus.in_progress
             # commit happens on context manager exit
 
+    if not posts:
+        logger.info("scheduler_job_done", job="publish_scheduled_posts", count=0)
+        return
+
     # Phase 2: publish each claimed post and update final status.
     for post in posts:
         try:
@@ -59,6 +63,9 @@ async def job_publish_scheduled_posts(bot: Bot) -> None:
                 publisher = PublisherService(session=s2, bot=bot)
                 success, msg = await publisher.publish(post.property_id)
                 p = await s2.get(ScheduledPost, post.id)
+                if p is None:
+                    logger.warning("scheduled_post_missing_after_publish", post_id=post.id)
+                    continue
                 if success:
                     p.status = ScheduledPostStatus.published
                     p.published_at = datetime.utcnow()
@@ -69,9 +76,10 @@ async def job_publish_scheduled_posts(bot: Bot) -> None:
         except Exception as e:
             async with AsyncSessionFactory() as s2:
                 p = await s2.get(ScheduledPost, post.id)
-                p.status = ScheduledPostStatus.failed
-                p.error_message = str(e)[:500]
-                await s2.commit()
+                if p is not None:
+                    p.status = ScheduledPostStatus.failed
+                    p.error_message = str(e)[:500]
+                    await s2.commit()
             logger.error("publish_scheduled_post_failed", post_id=post.id, error=str(e))
 
     logger.info("scheduler_job_done", job="publish_scheduled_posts", count=len(posts))

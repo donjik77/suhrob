@@ -9,8 +9,9 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import User, UserRole, ClientProfile, ClientConversation, Property, LeadAssignment, LeadStatus
+from src.db.models import User, UserRole, Company, ClientProfile, ClientConversation, Property, LeadAssignment, LeadStatus
 from src.db.session import AsyncSessionFactory
+from src.bot.handlers.client.property_access import get_active_property_for_client
 from src.config import settings
 from locales.uz import t
 
@@ -20,8 +21,8 @@ AI_DAILY_LIMIT = settings.AI_DAILY_LIMIT_PER_USER
 
 
 async def check_ai_limit(user_id: int, redis, daily_limit: int = AI_DAILY_LIMIT) -> tuple[bool, int]:
-    from datetime import datetime
-    today_key = datetime.utcnow().strftime("%Y-%m-%d")
+    from datetime import datetime, timezone
+    today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"ai_calls:{user_id}:{today_key}"
     count = await redis.incr(key)
     if count == 1:
@@ -51,8 +52,15 @@ async def start_consultation(message: Message, db_user: User, state: FSMContext)
 
 
 @router.callback_query(F.data.startswith("ai_consult:"))
-async def start_consultation_property(callback: CallbackQuery, db_user: User, state: FSMContext):
+async def start_consultation_property(callback: CallbackQuery, db_user: User, company: Company, state: FSMContext):
     property_id = int(callback.data.split(":")[1])
+
+    async with AsyncSessionFactory() as session:
+        prop = await get_active_property_for_client(property_id, company, session)
+    if not prop:
+        await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
+        return
+
     await state.set_state(ConsultState.chatting)
     await state.update_data(property_id=property_id)
     await callback.message.answer(

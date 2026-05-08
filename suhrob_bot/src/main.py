@@ -44,52 +44,6 @@ from src.bot.handlers.developer.companies import router as dev_companies_router
 from src.scheduler.setup import setup_scheduler
 
 
-async def auto_register_preset_users() -> None:
-    """Register director and agents from .env on every startup (idempotent)."""
-    from sqlalchemy import select
-    from sqlalchemy import update as sa_update
-    from src.db.session import AsyncSessionFactory
-    from src.db.models import Company, User, UserRole as UR
-
-    preset = [
-        (settings.DIRECTOR_TELEGRAM_ID, UR.director),
-        (settings.AGENT_1_TELEGRAM_ID, UR.agent),
-        (settings.AGENT_2_TELEGRAM_ID, UR.agent),
-        (settings.AGENT_3_TELEGRAM_ID, UR.agent),
-    ]
-    preset = [(tg_id, role) for tg_id, role in preset if tg_id]
-    if not preset:
-        return
-
-    async with AsyncSessionFactory() as session:
-        company = (await session.execute(
-            select(Company).where(Company.is_active == True).limit(1)
-        )).scalar_one_or_none()
-        company_id = company.id if company else None
-
-        for tg_id, role in preset:
-            if tg_id == settings.DEVELOPER_TELEGRAM_ID:
-                continue
-            existing = (await session.execute(
-                select(User).where(User.telegram_user_id == tg_id)
-            )).scalar_one_or_none()
-            if existing:
-                updates: dict = {}
-                if existing.role != role:
-                    updates["role"] = role
-                if company_id and existing.company_id != company_id:
-                    updates["company_id"] = company_id
-                if updates:
-                    await session.execute(
-                        sa_update(User).where(User.telegram_user_id == tg_id).values(**updates)
-                    )
-            else:
-                session.add(User(telegram_user_id=tg_id, role=role, company_id=company_id))
-
-        await session.commit()
-    logging.info("auto_register_preset_users: completed")
-
-
 def run_migrations() -> None:
     """Run alembic upgrade head before the event loop starts."""
     try:
@@ -193,9 +147,6 @@ async def main():
         dev_bot_token = os.environ.get("BOT_TOKEN") or None
     except Exception:
         pass
-
-    # Auto-register preset director/agents from .env
-    await auto_register_preset_users()
 
     # Start all company bots from DB
     await bot_manager.start_all()

@@ -3,9 +3,10 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import User, UserRole
+from src.db.models import User, UserRole, Company
 from src.bot.keyboards.client import main_menu_kb, property_card_kb
 from src.bot.keyboards.agent import agent_menu_kb
+from src.bot.handlers.client.property_access import get_active_property_for_client
 from src.utils.formatters import format_property_card
 from locales.uz import t
 
@@ -13,7 +14,7 @@ router = Router()
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, db_user: User, command: CommandObject, db_session: AsyncSession):
+async def cmd_start(message: Message, db_user: User, command: CommandObject, db_session: AsyncSession, company: Company):
     name = message.from_user.full_name or message.from_user.username or "Foydalanuvchi"
 
     # Handle deep-link: /start property_123
@@ -21,7 +22,7 @@ async def cmd_start(message: Message, db_user: User, command: CommandObject, db_
     if arg.startswith("property_") and db_user.role == UserRole.client:
         try:
             property_id = int(arg.split("_", 1)[1])
-            await _show_property_deeplink(message, db_session, property_id, db_user)
+            await _show_property_deeplink(message, db_session, property_id, db_user, company)
             return
         except (ValueError, IndexError):
             pass
@@ -40,20 +41,29 @@ async def cmd_start(message: Message, db_user: User, command: CommandObject, db_
         )
 
 
-async def _show_property_deeplink(message: Message, session: AsyncSession, property_id: int, db_user: User) -> None:
-    from sqlalchemy import select
-    from src.db.models import Property, PropertyStatus
+async def _show_property_deeplink(
+    message: Message,
+    session: AsyncSession,
+    property_id: int,
+    db_user: User,
+    company: Company | None,
+) -> None:
     from src.db.repositories.settings_repo import SettingsRepository
 
-    prop = (
-        await session.execute(
-            select(Property).where(Property.id == property_id, Property.status == PropertyStatus.active)
-        )
-    ).scalar_one_or_none()
+    prop = await get_active_property_for_client(property_id, company, session, with_media=True, with_agent=True)
 
     if not prop:
         await message.answer(t("welcome", name=message.from_user.full_name or "Foydalanuvchi"), reply_markup=main_menu_kb(), parse_mode="HTML")
         return
+
+    from sqlalchemy import update
+    from src.db.models import Property
+    await session.execute(
+        update(Property)
+        .where(Property.id == prop.id, Property.company_id == prop.company_id)
+        .values(views_count=Property.views_count + 1)
+    )
+    await session.commit()
 
     settings_repo = SettingsRepository(session)
     rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)

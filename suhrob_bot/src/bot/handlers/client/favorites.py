@@ -4,8 +4,8 @@ from aiogram.types import Message, CallbackQuery
 from src.db.models import User, Company, Property, PropertyStatus, LeadAssignment, LeadStatus
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.settings_repo import SettingsRepository
-from src.db.repositories.property_repo import PropertyRepository
 from src.bot.keyboards.client import favorites_kb, main_menu_kb
+from src.bot.handlers.client.property_access import get_active_property_for_client
 from src.utils.formatters import format_property_card
 from locales.uz import t
 
@@ -13,15 +13,24 @@ router = Router()
 
 
 @router.message(F.text == "🟣 ⭐ Saralangan")
-async def show_favorites(message: Message, db_user: User):
+async def show_favorites(message: Message, db_user: User, company: Company):
+    if company is None:
+        await message.answer("Kompaniya topilmadi.", reply_markup=main_menu_kb())
+        return
+
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
-        from src.db.models import ClientFavorite, Property, PropertyStatus
+        from src.db.models import ClientFavorite, Property
         from sqlalchemy.orm import selectinload
 
         result = await session.execute(
             select(ClientFavorite)
             .where(ClientFavorite.user_id == db_user.id)
+            .join(Property, ClientFavorite.property_id == Property.id)
+            .where(
+                Property.company_id == company.id,
+                Property.status == PropertyStatus.active,
+            )
             .options(
                 selectinload(ClientFavorite.property)
                 .selectinload(Property.media),
@@ -43,23 +52,35 @@ async def show_favorites(message: Message, db_user: User):
 
         for fav in favorites:
             prop = fav.property
-            if not prop or prop.status.value == "hidden":
+            if not prop:
                 continue
+            from sqlalchemy import update
+            await session.execute(
+                update(Property)
+                .where(Property.id == prop.id, Property.company_id == company.id)
+                .values(views_count=Property.views_count + 1)
+            )
             card_text = format_property_card(prop, rate)
             kb = favorites_kb(prop.id)
             if prop.media:
                 await message.answer_photo(photo=prop.media[0].file_id, caption=card_text, reply_markup=kb)
             else:
                 await message.answer(card_text, reply_markup=kb)
+        await session.commit()
 
 
 @router.callback_query(F.data.startswith("prop_fav:"))
-async def add_to_favorites(callback: CallbackQuery, db_user: User):
+async def add_to_favorites(callback: CallbackQuery, db_user: User, company: Company):
     property_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
         from src.db.models import ClientFavorite
+
+        prop = await get_active_property_for_client(property_id, company, session)
+        if not prop:
+            await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
+            return
 
         existing = await session.execute(
             select(ClientFavorite).where(
@@ -103,16 +124,7 @@ async def contact_agent(callback: CallbackQuery, db_user: User, company: Company
     property_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-        result = await session.execute(
-            select(Property).where(
-                Property.id == property_id,
-                Property.status == PropertyStatus.active,
-                Property.company_id == company.id,
-            ).options(selectinload(Property.agent))
-        )
-        prop = result.scalar_one_or_none()
+        prop = await get_active_property_for_client(property_id, company, session, with_agent=True)
         if not prop:
             await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
             return

@@ -12,6 +12,7 @@ from src.bot.filters.role import RoleFilter
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director))
+router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director))
 
 
 class EditProfileStates(StatesGroup):
@@ -43,6 +44,16 @@ async def show_profile(message: Message, db_user: User):
 async def edit_name_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("✏️ Yangi ismni kiriting (3-100 ta belgi):")
     await state.set_state(EditProfileStates.editing_name)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "edit_profile")
+async def edit_profile_menu(callback: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="profile_edit_name")],
+        [InlineKeyboardButton(text="✏️ Telefonni o'zgartirish", callback_data="profile_edit_phone")],
+    ])
+    await callback.message.answer("✏️ Qaysi ma'lumotni o'zgartirmoqchisiz?", reply_markup=kb)
     await callback.answer()
 
 

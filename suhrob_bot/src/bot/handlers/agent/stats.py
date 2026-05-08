@@ -13,43 +13,31 @@ router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.dev
 @router.message(F.text == "🔵 📊 Statistika")
 async def agent_stats(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import select, func
-        from datetime import datetime, timedelta
+        from sqlalchemy import case, select, func
+        from datetime import datetime, timedelta, timezone
         from src.db.models import Property, SearchRequest
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         month_ago = now - timedelta(days=30)
 
         from src.db.models import LeadAssignment
 
-        # Count active props
-        active_count = await session.scalar(
-            select(func.count()).where(
-                Property.agent_id == db_user.id,
-                Property.status == PropertyStatus.active,
+        stats = await session.execute(
+            select(
+                func.count(Property.id).label("total"),
+                func.coalesce(func.sum(case((Property.status == PropertyStatus.active, 1), else_=0)), 0).label("active"),
+                func.coalesce(func.sum(case((Property.status == PropertyStatus.sold, 1), else_=0)), 0).label("sold"),
+                func.coalesce(func.sum(Property.views_count), 0).label("views"),
+                func.coalesce(func.sum(Property.contacts_count), 0).label("contacts"),
             )
+            .where(Property.agent_id == db_user.id)
         )
+        row = stats.one()
 
-        # Count sold props
-        sold_count = await session.scalar(
-            select(func.count()).where(
-                Property.agent_id == db_user.id,
-                Property.status == PropertyStatus.sold,
-            )
-        )
-
-        # Sum views_count and contacts_count across agent's properties
-        views_count = await session.scalar(
-            select(func.coalesce(func.sum(Property.views_count), 0)).where(
-                Property.agent_id == db_user.id,
-            )
-        )
-
-        contacts_count = await session.scalar(
-            select(func.coalesce(func.sum(Property.contacts_count), 0)).where(
-                Property.agent_id == db_user.id,
-            )
-        )
+        active_count = row.active
+        sold_count = row.sold
+        views_count = row.views
+        contacts_count = row.contacts
 
         # Count leads assigned to this agent
         leads_count = await session.scalar(
@@ -65,7 +53,9 @@ async def agent_stats(message: Message, db_user: User):
                 SearchRequest.rooms,
                 func.count().label("cnt"),
             )
+            .join(User, User.id == SearchRequest.user_id)
             .where(SearchRequest.created_at >= month_ago)
+            .where(User.company_id == db_user.company_id)
             .group_by(SearchRequest.location_district, SearchRequest.rooms)
             .order_by(func.count().desc())
             .limit(3)

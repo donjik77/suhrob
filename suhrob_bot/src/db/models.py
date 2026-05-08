@@ -149,7 +149,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     username: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -181,7 +181,20 @@ class User(Base):
     )
 
     __table_args__ = (
-        Index("ix_users_telegram_user_id", "telegram_user_id", unique=True),
+        Index("ix_users_telegram_user_id", "telegram_user_id"),
+        Index(
+            "ix_users_telegram_company_active",
+            "telegram_user_id",
+            "company_id",
+            unique=True,
+            postgresql_where=(company_id.is_not(None) & (telegram_user_id != 0)),
+        ),
+        Index(
+            "ix_users_telegram_global_active",
+            "telegram_user_id",
+            unique=True,
+            postgresql_where=(company_id.is_(None) & (telegram_user_id != 0)),
+        ),
         Index("ix_users_company_role", "company_id", "role"),
     )
 

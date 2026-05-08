@@ -5,6 +5,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.db.models import User, UserRole, PropertyStatus, Property
 from src.db.session import AsyncSessionFactory
@@ -29,9 +30,14 @@ async def get_property_for_director(
 ) -> Property | None:
     company_id = await _get_company_id(director)
     result = await session.execute(
-        select(Property).where(
+        select(Property)
+        .where(
             Property.id == property_id,
             Property.company_id == company_id,
+        )
+        .options(
+            selectinload(Property.media),
+            selectinload(Property.agent),
         )
     )
     return result.scalar_one_or_none()
