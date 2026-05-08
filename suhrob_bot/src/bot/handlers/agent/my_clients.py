@@ -22,7 +22,7 @@ STATUS_LABELS = {
 }
 
 
-@router.message(F.text.contains("Mijozlarim"))
+@router.message(F.text == "🔥 Mening mijozlarim")
 async def my_clients_menu(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         counts = {}

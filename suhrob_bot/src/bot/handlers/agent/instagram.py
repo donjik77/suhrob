@@ -11,7 +11,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director))
 
 
-@router.message(F.text.contains("Instagram"))
+@router.message(F.text == "🟣 📷 Instagram ulash")
 async def instagram_menu(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         active = (

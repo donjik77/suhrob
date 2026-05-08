@@ -28,7 +28,7 @@ class AddCompanyState(StatesGroup):
     bot_username = State()
 
 
-@router.message(F.text.contains("Kompaniyalar"))
+@router.message(F.text == "🔵 🏢 Kompaniyalar")
 async def list_companies(message: Message):
     async with AsyncSessionFactory() as session:
         companies = (

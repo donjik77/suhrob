@@ -134,7 +134,7 @@ async def _score_and_sort_photos(bot: Bot, photos: list[dict]) -> list[dict]:
 
 # ─── Step 1: Entry → choose property type ────────────────────────────────────
 
-@router.message(F.text == "➕ Yangi uy qo'shish")
+@router.message(F.text == "🟢 ➕ Yangi uy qo'shish")
 async def start_add_property(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(AddPropertyStates.choosing_type)

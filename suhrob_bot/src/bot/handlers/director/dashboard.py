@@ -15,7 +15,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text.contains("Dashboard") | F.text.contains("Statistika (to"))
+@router.message(F.text == "🔵 📈 To'liq statistika")
 async def full_dashboard(message: Message, db_user: User):
     if not db_user.company_id:
         await message.answer("Kompaniya topilmadi.")

@@ -19,7 +19,7 @@ class SettingEditStates(StatesGroup):
     entering_value = State()
 
 
-@router.message(F.text == "⚙️ Tizim sozlamalari")
+@router.message(F.text == "🔵 ⚙️ Tizim sozlamalari")
 async def system_settings(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         repo = SettingsRepository(session)
@@ -49,29 +49,6 @@ async def set_setting(message: Message, db_user: User):
         await repo.set(key, value, updated_by=db_user.id)
 
     await message.answer(f"✅ {key} = {value} qilib saqlandi.")
-
-
-@router.message(F.text == "🏢 Kompaniyalar")
-async def list_companies(message: Message):
-    async with AsyncSessionFactory() as session:
-        from sqlalchemy import select
-
-        result = await session.execute(select(Company))
-        companies = list(result.scalars().all())
-
-    if not companies:
-        await message.answer("Kompaniyalar yo'q.\n\nYangi qo'shish: /new_company")
-        return
-
-    lines = ["🏢 Barcha kompaniyalar:\n"]
-    for c in companies:
-        status = "✅ Faol" if c.is_active else "❌ Nofaol"
-        channel = c.telegram_channel_id or "—"
-        lines.append(f"• {c.name} [{status}] ID:{c.id} | kanal: {channel}")
-
-    lines.append("\n/new_company — yangi kompaniya qo'shish")
-    lines.append("/set_role <tg_id> <rol> <company_id> — foydalanuvchi rolini o'zgartirish")
-    await message.answer("\n".join(lines))
 
 
 # ─── New company FSM ──────────────────────────────────────────────────────────

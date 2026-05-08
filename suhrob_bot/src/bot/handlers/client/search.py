@@ -22,7 +22,7 @@ from locales.uz import t
 router = Router()
 
 
-@router.message(F.text == "🔍 Uy qidirish")
+@router.message(F.text == "🔵 🔍 Uy qidirish")
 async def start_search(message: Message, state: FSMContext, db_user: User):
     await state.clear()
     await state.set_state(SearchStates.choosing_type)

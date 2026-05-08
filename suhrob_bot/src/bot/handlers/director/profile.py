@@ -14,7 +14,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text.contains("Profilim"))
+@router.message(F.text == "🟠 👤 Mening profilim")
 async def director_profile(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         balance_row = (

@@ -9,6 +9,40 @@ from src.db.session import AsyncSessionFactory
 router = Router()
 
 
+@router.message(F.text == "🟡 🔔 Bildirishnomalar")
+async def notifications_menu(message: Message, db_user: User):
+    async with AsyncSessionFactory() as session:
+        alert = (
+            await session.execute(
+                select(ClientAlert).where(
+                    ClientAlert.user_id == db_user.id,
+                    ClientAlert.is_active == True,
+                )
+            )
+        ).scalar_one_or_none()
+
+    if alert:
+        district = alert.location_district or "istalgan"
+        price = f"${int(alert.price_max_usd)}" if alert.price_max_usd else "istalgan"
+        rooms = str(alert.rooms) if alert.rooms else "istalgan"
+        text = (
+            "🔔 <b>Bildirishnomalar faol</b>\n\n"
+            f"📍 Tuman: {district}\n"
+            f"💰 Narx (max): {price}\n"
+            f"🚪 Xonalar: {rooms}\n\n"
+            "Yangi mos uy chiqsa, sizga xabar beramiz.\n\n"
+            "❌ Bekor qilish uchun /unsubscribe yozing."
+        )
+    else:
+        text = (
+            "🔕 <b>Bildirishnomalar o'chirilgan</b>\n\n"
+            "Uy qidirishdan so'ng 'Yangi chiqsa, xabar bering' tugmasini bosing.\n"
+            "Siz ko'rsatgan parametrlarga mos yangi uy chiqsa, avtomatik xabar olasiz."
+        )
+
+    await message.answer(text)
+
+
 @router.callback_query(F.data.startswith("subscribe_alert:"))
 async def subscribe_to_alerts(callback: CallbackQuery, db_user: User):
     """

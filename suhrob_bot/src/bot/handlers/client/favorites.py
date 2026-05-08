@@ -12,7 +12,7 @@ from locales.uz import t
 router = Router()
 
 
-@router.message(F.text == "⭐ Saralangan")
+@router.message(F.text == "🟣 ⭐ Saralangan")
 async def show_favorites(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select

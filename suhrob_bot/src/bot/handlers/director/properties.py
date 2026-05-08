@@ -22,7 +22,7 @@ PAGE_SIZE = 5
 
 # ─── All properties ───────────────────────────────────────────────────────────
 
-@router.message(F.text == "🏢 Barcha uylar")
+@router.message(F.text == "🔵 🏢 Barcha uylar")
 async def all_properties(message: Message, db_user: User):
     await _show_company_props_page(message, db_user, page=1, send=True)
 
@@ -160,7 +160,7 @@ async def delete_any(callback: CallbackQuery):
 
 # ─── Full stats ───────────────────────────────────────────────────────────────
 
-@router.message(F.text == "📈 To'liq statistika")
+@router.message(F.text == "🔵 📈 To'liq statistika")
 async def full_stats(message: Message, db_user: User):
     company_id = await _get_company_id(db_user)
     if not company_id:

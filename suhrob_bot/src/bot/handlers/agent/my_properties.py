@@ -38,7 +38,7 @@ router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserR
 PAGE_SIZE = 5
 
 
-@router.message(F.text == "📋 Mening uylarim")
+@router.message(F.text == "🔵 📋 Mening uylarim")
 async def my_properties(message: Message, db_user: User):
     await _show_properties_page(message, db_user, page=1, send=True)
 

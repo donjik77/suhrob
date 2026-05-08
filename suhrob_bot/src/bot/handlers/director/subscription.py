@@ -17,7 +17,7 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "💳 Obuna holati")
+@router.message(F.text == "🟠 💳 Obuna holati")
 async def subscription_status(message: Message, db_user: User):
     if db_user.company_id is None:
         await message.answer("Kompaniya topilmadi.")

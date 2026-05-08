@@ -18,7 +18,7 @@ class AgentSettingsStates(StatesGroup):
     entering_phone = State()
 
 
-@router.message(F.text == "⚙️ Sozlamalar")
+@router.message(F.text == "🔵 ⚙️ Sozlamalar")
 async def settings_menu(message: Message, state: FSMContext, db_user: User):
     await state.clear()
     await state.set_state(AgentSettingsStates.choosing)

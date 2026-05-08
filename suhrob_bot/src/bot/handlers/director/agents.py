@@ -13,7 +13,7 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "👥 Agentlar boshqaruvi")
+@router.message(F.text == "🔵 👥 Agentlar boshqaruvi")
 async def list_agents(message: Message, db_user: User):
     if db_user.company_id is None:
         await message.answer("Kompaniya topilmadi.")
