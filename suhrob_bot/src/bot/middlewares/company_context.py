@@ -8,7 +8,8 @@ Injects `company` into handler data. For the developer's personal bot
 from typing import Any, Awaitable, Callable, Optional
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Update, Message, CallbackQuery
+from aiogram.types import TelegramObject
+from sqlalchemy import func, select
 
 from src.db.session import AsyncSessionFactory
 from src.db.models import Company
@@ -29,16 +30,40 @@ class CompanyContextMiddleware(BaseMiddleware):
 
         if bot is not None:
             company_id = self._manager.get_company_id(bot.id)
-            if company_id is not None:
-                async with AsyncSessionFactory() as session:
-                    from sqlalchemy import select
-                    from sqlalchemy.orm import selectinload
+            async with AsyncSessionFactory() as session:
+                if company_id is not None:
                     company = (
                         await session.execute(
-                            select(Company)
-                            .where(Company.id == company_id)
+                            select(Company).where(Company.id == company_id)
                         )
                     ).scalar_one_or_none()
+
+                if company is None:
+                    company = (
+                        await session.execute(
+                            select(Company).where(
+                                Company.bot_id == bot.id,
+                                Company.is_active == True,
+                            )
+                        )
+                    ).scalar_one_or_none()
+
+                if company is None:
+                    active_count = await session.scalar(
+                        select(func.count(Company.id)).where(Company.is_active == True)
+                    )
+                    if active_count == 1:
+                        company = (
+                            await session.execute(
+                                select(Company)
+                                .where(Company.is_active == True)
+                                .order_by(Company.id.asc())
+                                .limit(1)
+                            )
+                        ).scalar_one_or_none()
+
+                if company is not None and hasattr(self._manager, "_bot_to_company"):
+                    self._manager._bot_to_company[bot.id] = company.id
 
         data["company"] = company
         return await handler(event, data)

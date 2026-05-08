@@ -13,6 +13,7 @@ from src.db.models import User, UserRole, Property, PropertyStatus
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.user_repo import UserRepository
 from src.bot.filters.role import RoleFilter
+from src.bot.handlers.director.company_scope import resolve_actor_company_id
 from locales.uz import t
 
 router = Router()
@@ -22,13 +23,14 @@ router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 @router.message(F.text == "🔵 👥 Agentlar boshqaruvi")
 async def list_agents(message: Message, db_user: User):
-    if db_user.company_id is None:
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
         await message.answer("Kompaniya topilmadi.")
         return
 
     async with AsyncSessionFactory() as session:
         repo = UserRepository(session)
-        agents = await repo.get_company_users_by_role(db_user.company_id, UserRole.agent)
+        agents = await repo.get_company_users_by_role(company_id, UserRole.agent)
 
     builder = InlineKeyboardBuilder()
     lines = ["👥 Kompaniya agentlari:\n"]
@@ -51,13 +53,17 @@ async def list_agents(message: Message, db_user: User):
 @router.callback_query(F.data.startswith("agent_manage:"))
 async def manage_agent(callback: CallbackQuery, db_user: User):
     agent_id = int(callback.data.split(":")[1])
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
         result = await session.execute(
             select(User).where(
                 User.id == agent_id,
-                User.company_id == db_user.company_id,
+                User.company_id == company_id,
                 User.role == UserRole.agent,
             )
         )
@@ -87,13 +93,17 @@ async def toggle_agent_block(callback: CallbackQuery, db_user: User):
     parts = callback.data.split(":")
     agent_id = int(parts[1])
     blocked = parts[2] == "1"
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select, update
         target = (await session.execute(
             select(User).where(
                 User.id == agent_id,
-                User.company_id == db_user.company_id,
+                User.company_id == company_id,
                 User.role == UserRole.agent,
             )
         )).scalar_one_or_none()
@@ -106,7 +116,7 @@ async def toggle_agent_block(callback: CallbackQuery, db_user: User):
             update(User)
             .where(
                 User.id == agent_id,
-                User.company_id == db_user.company_id,
+                User.company_id == company_id,
                 User.role == UserRole.agent,
             )
             .values(is_blocked=blocked)
@@ -128,7 +138,8 @@ class AddAgentStates(StatesGroup):
 
 @router.callback_query(F.data == "add_agent")
 async def start_add_agent(callback: CallbackQuery, state: FSMContext, db_user: User):
-    if db_user.company_id is None:
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
         await callback.answer("Kompaniya topilmadi.", show_alert=True)
         return
     await callback.message.answer(
@@ -167,7 +178,8 @@ async def add_agent_phone(message: Message, state: FSMContext):
 
 @router.message(StateFilter(AddAgentStates.waiting_telegram))
 async def add_agent_telegram(message: Message, state: FSMContext, db_user: User, bot):
-    if db_user.company_id is None:
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
         await message.answer("Kompaniya topilmadi.")
         await state.clear()
         return
@@ -191,7 +203,7 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
             existing = await session.execute(
                 sa_select(User).where(
                     User.telegram_user_id == telegram_user_id,
-                    User.company_id == db_user.company_id,
+                    User.company_id == company_id,
                 )
             )
             if existing.scalar_one_or_none():
@@ -203,7 +215,7 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
                 sa_select(User).where(
                     User.telegram_user_id == 0,
                     func.lower(User.username) == username.lower(),
-                    User.company_id == db_user.company_id,
+                    User.company_id == company_id,
                     User.role == UserRole.agent,
                 )
             )
@@ -218,7 +230,7 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
             full_name=data['full_name'],
             phone=data['phone'],
             role=UserRole.agent,
-            company_id=db_user.company_id,
+            company_id=company_id,
         )
         session.add(new_agent)
         await session.commit()
@@ -257,7 +269,8 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
 
 @router.message(F.text.contains("reytingi"))
 async def agents_rating(message: Message, db_user: User):
-    if db_user.company_id is None:
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
         await message.answer("Kompaniya topilmadi.")
         return
 
@@ -280,7 +293,7 @@ async def agents_rating(message: Message, db_user: User):
             .outerjoin(Property, Property.agent_id == User.id)
             .where(
                 User.role == UserRole.agent,
-                User.company_id == db_user.company_id,
+                User.company_id == company_id,
                 User.is_blocked == False,
             )
             .group_by(User.id, User.full_name)

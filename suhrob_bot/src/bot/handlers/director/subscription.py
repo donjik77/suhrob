@@ -8,7 +8,9 @@ from src.db.repositories.subscription_repo import SubscriptionRepository
 from src.db.repositories.settings_repo import SettingsRepository
 from src.bot.keyboards.payment import payment_method_kb, cancel_payment_kb
 from src.bot.filters.role import RoleFilter
+from src.bot.handlers.director.company_scope import resolve_actor_company_id
 from src.bot.states.payment import PaymentStates
+from src.bot.utils.payment_media import payment_photo_input
 from src.utils.currency import usd_to_uzs
 from locales.uz import t
 
@@ -17,15 +19,31 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
+async def _send_payment_instruction(callback: CallbackQuery, text: str, qr_file_id: str | None = None) -> None:
+    if qr_file_id:
+        try:
+            await callback.message.answer_photo(
+                photo=payment_photo_input(qr_file_id),
+                caption=text,
+                reply_markup=cancel_payment_kb(),
+            )
+            return
+        except Exception:
+            pass
+
+    await callback.message.answer(text, reply_markup=cancel_payment_kb())
+
+
 @router.message(F.text == "🟠 💳 Obuna holati")
 async def subscription_status(message: Message, db_user: User):
-    if db_user.company_id is None:
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
         await message.answer("Kompaniya topilmadi.")
         return
 
     async with AsyncSessionFactory() as session:
         sub_repo = SubscriptionRepository(session)
-        sub = await sub_repo.get_latest(db_user.company_id)
+        sub = await sub_repo.get_latest(company_id)
 
     if not sub:
         await message.answer("Obuna topilmadi.")
@@ -63,6 +81,7 @@ async def start_payment(callback: CallbackQuery, state: FSMContext, db_user: Use
 async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_user: User):
     method = callback.data.split(":")[1]
     await state.update_data(payment_method=method)
+    qr_file_id = None
 
     async with AsyncSessionFactory() as session:
         settings_repo = SettingsRepository(session)
@@ -77,6 +96,10 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
         else:
             card = await settings_repo.get(f"payment_{method}_card") or "—"
             holder = await settings_repo.get(f"payment_{method}_holder") or "—"
+            qr_file_id = (
+                await settings_repo.get(f"payment_{method}_qr_file_id")
+                or await settings_repo.get(f"payment_{method}_qr_photo")
+            )
             text = t(
                 "payment_instructions_card",
                 method=method.upper(),
@@ -89,7 +112,7 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
     await state.set_state(PaymentStates.waiting_proof)
     await state.update_data(price_usd=price_usd, price_uzs=price_uzs)
 
-    await callback.message.answer(text, reply_markup=cancel_payment_kb())
+    await _send_payment_instruction(callback, text, qr_file_id)
     await callback.answer()
 
 
@@ -99,13 +122,18 @@ async def receive_payment_proof(message: Message, state: FSMContext, db_user: Us
     method = data.get("payment_method", "")
     price_usd = data.get("price_usd", 49)
     file_id = message.photo[-1].file_id
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
+        await message.answer("Kompaniya topilmadi.")
+        await state.clear()
+        return
 
     async with AsyncSessionFactory() as session:
         sub_repo = SubscriptionRepository(session)
-        sub = await sub_repo.get_latest(db_user.company_id)
+        sub = await sub_repo.get_latest(company_id)
 
         if sub is None:
-            sub = await sub_repo.create(db_user.company_id, price_usd=price_usd)
+            sub = await sub_repo.create(company_id, price_usd=price_usd)
 
         sub.payment_proof_file_id = file_id
         sub.payment_method = PaymentMethod(method) if method else None
@@ -116,7 +144,7 @@ async def receive_payment_proof(message: Message, state: FSMContext, db_user: Us
         # Get company name
         from src.db.models import Company
         from sqlalchemy import select
-        company = await session.get(Company, db_user.company_id)
+        company = await session.get(Company, company_id)
         company_name = company.name if company else "—"
 
     await message.answer(t("payment_proof_received"))

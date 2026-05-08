@@ -9,6 +9,7 @@ from src.db.models import (
 )
 from src.db.session import AsyncSessionFactory
 from src.bot.filters.role import RoleFilter
+from src.bot.handlers.director.company_scope import resolve_actor_company_id
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
@@ -16,6 +17,7 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 @router.message(F.text == "🟠 👤 Mening profilim")
 async def director_profile(message: Message, db_user: User):
+    company_id = await resolve_actor_company_id(db_user)
     async with AsyncSessionFactory() as session:
         balance_row = (
             await session.execute(
@@ -26,7 +28,7 @@ async def director_profile(message: Message, db_user: User):
         base_sub = (
             await session.execute(
                 select(Subscription).where(
-                    Subscription.company_id == db_user.company_id,
+                    Subscription.company_id == company_id,
                     Subscription.subscription_type == SubscriptionType.base,
                     Subscription.status == SubscriptionStatus.active,
                 ).order_by(Subscription.period_end.desc())
@@ -36,7 +38,7 @@ async def director_profile(message: Message, db_user: User):
         ig_sub = (
             await session.execute(
                 select(Subscription).where(
-                    Subscription.company_id == db_user.company_id,
+                    Subscription.company_id == company_id,
                     Subscription.subscription_type == SubscriptionType.instagram,
                     Subscription.status == SubscriptionStatus.active,
                 )

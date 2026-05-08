@@ -1,4 +1,6 @@
+import os
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,13 +13,72 @@ DEFAULT_SETTINGS = {
     "currency_rate_uzs_per_usd": "12600",
     "payment_click_card": "",
     "payment_click_holder": "",
+    "payment_click_qr_file_id": "",
     "payment_humo_card": "",
     "payment_humo_holder": "",
+    "payment_humo_qr_file_id": "",
     "payment_uzcard_card": "",
     "payment_uzcard_holder": "",
+    "payment_uzcard_qr_file_id": "",
     "payment_crypto_address": "",
     "payment_crypto_network": "USDT TRC-20",
 }
+
+_DOTENV_CACHE: dict[str, str] | None = None
+
+
+def _load_dotenv_values() -> dict[str, str]:
+    global _DOTENV_CACHE
+    if _DOTENV_CACHE is not None:
+        return _DOTENV_CACHE
+
+    env_path = Path(__file__).resolve().parents[3] / ".env"
+    values: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                values[key] = value
+
+    _DOTENV_CACHE = values
+    return values
+
+
+def _env_candidates(key: str) -> list[str]:
+    upper = key.upper()
+    candidates = [upper, key]
+
+    if upper.startswith("PAYMENT_"):
+        candidates.append(upper.removeprefix("PAYMENT_"))
+
+    if upper.endswith("_FILE_ID"):
+        candidates.append(upper.removesuffix("_FILE_ID"))
+        if upper.startswith("PAYMENT_"):
+            candidates.append(upper.removeprefix("PAYMENT_").removesuffix("_FILE_ID"))
+
+    if upper.endswith("_PHOTO"):
+        candidates.append(upper.removesuffix("_PHOTO"))
+        if upper.startswith("PAYMENT_"):
+            candidates.append(upper.removeprefix("PAYMENT_").removesuffix("_PHOTO"))
+
+    return list(dict.fromkeys(candidates))
+
+
+def _get_env_fallback(key: str) -> Optional[str]:
+    dotenv_values = _load_dotenv_values()
+    for candidate in _env_candidates(key):
+        value = os.environ.get(candidate)
+        if value:
+            return value
+        value = dotenv_values.get(candidate)
+        if value:
+            return value
+    return None
 
 
 class SettingsRepository:
@@ -29,7 +90,9 @@ class SettingsRepository:
             select(BotSetting.value).where(BotSetting.key == key)
         )
         row = result.scalar_one_or_none()
-        return row if row is not None else default
+        if row and row.strip():
+            return row
+        return _get_env_fallback(key) or default
 
     async def get_int(self, key: str, default: int = 0) -> int:
         val = await self.get(key)

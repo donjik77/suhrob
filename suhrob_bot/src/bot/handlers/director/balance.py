@@ -16,6 +16,7 @@ from src.db.models import (
 from src.bot.filters.role import RoleFilter
 from src.config import settings
 from src.db.repositories.settings_repo import SettingsRepository
+from src.bot.utils.payment_media import payment_photo_input
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
@@ -115,6 +116,29 @@ def _topup_instruction(
     )
 
 
+async def _show_topup_instruction(
+    callback: CallbackQuery,
+    text: str,
+    qr_file_id: str | None = None,
+) -> None:
+    if qr_file_id:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        try:
+            await callback.message.answer_photo(
+                photo=payment_photo_input(qr_file_id),
+                caption=text,
+                reply_markup=_cancel_topup_kb(),
+            )
+            return
+        except Exception:
+            pass
+
+    await callback.message.edit_text(text, reply_markup=_cancel_topup_kb())
+
+
 @router.callback_query(F.data == "topup_balance")
 async def start_topup(callback: CallbackQuery):
     await callback.message.edit_text(
@@ -179,6 +203,7 @@ async def select_method(callback: CallbackQuery, state: FSMContext, db_user: Use
     sr = SettingsRepository(db_session)
     rate = await sr.get_decimal("currency_rate_uzs_per_usd", Decimal("12600"))
     amount_uzs = (amount * rate).quantize(Decimal("0.01"))
+    qr_file_id = None
 
     if method == "crypto":
         address = await sr.get("payment_crypto_address", "Manzil sozlanmagan")
@@ -193,6 +218,10 @@ async def select_method(callback: CallbackQuery, state: FSMContext, db_user: Use
     else:
         card = await sr.get(f"payment_{method}_card", "Karta sozlanmagan")
         holder = await sr.get(f"payment_{method}_holder", "")
+        qr_file_id = (
+            await sr.get(f"payment_{method}_qr_file_id")
+            or await sr.get(f"payment_{method}_qr_photo")
+        )
         text = _topup_instruction(
             method=method,
             amount=amount,
@@ -203,7 +232,7 @@ async def select_method(callback: CallbackQuery, state: FSMContext, db_user: Use
 
     await state.set_state(TopUpState.waiting_proof)
     await state.update_data(amount=str(amount), amount_uzs=str(amount_uzs), method=method)
-    await callback.message.edit_text(text, reply_markup=_cancel_topup_kb())
+    await _show_topup_instruction(callback, text, qr_file_id)
     await callback.answer()
 
 

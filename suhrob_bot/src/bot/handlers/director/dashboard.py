@@ -10,6 +10,7 @@ from src.db.models import (
 )
 from src.db.session import AsyncSessionFactory
 from src.bot.filters.role import RoleFilter
+from src.bot.handlers.director.company_scope import resolve_actor_company_id
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
@@ -17,12 +18,12 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 @router.message(F.text == "🔵 📈 To'liq statistika")
 async def full_dashboard(message: Message, db_user: User):
-    if not db_user.company_id:
+    cid = await resolve_actor_company_id(db_user)
+    if not cid:
         await message.answer("Kompaniya topilmadi.")
         return
 
     since = datetime.now(timezone.utc) - timedelta(days=30)
-    cid = db_user.company_id
 
     async with AsyncSessionFactory() as session:
         # Properties

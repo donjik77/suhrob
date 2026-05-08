@@ -11,7 +11,8 @@ from typing import Any, Awaitable, Callable, Optional
 
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Update, Message, CallbackQuery
-from sqlalchemy import func, update as sa_update
+from sqlalchemy import func, select, update as sa_update
+from sqlalchemy.orm import selectinload
 
 from src.db.session import AsyncSessionFactory
 from src.db.models import User, UserRole, Company
@@ -19,6 +20,49 @@ from src.config import settings
 
 
 class AuthMiddleware(BaseMiddleware):
+    def _preset_role_for_telegram_id(self, telegram_id: int) -> Optional[UserRole]:
+        if getattr(settings, "DIRECTOR_TELEGRAM_ID", None) == telegram_id:
+            return UserRole.director
+
+        agent_ids = (
+            getattr(settings, "AGENT_1_TELEGRAM_ID", None),
+            getattr(settings, "AGENT_2_TELEGRAM_ID", None),
+            getattr(settings, "AGENT_3_TELEGRAM_ID", None),
+        )
+        if telegram_id in [agent_id for agent_id in agent_ids if agent_id]:
+            return UserRole.agent
+
+        return None
+
+    async def _get_user_without_company_context(self, session, repo, telegram_id: int) -> Optional[User]:
+        scoped_users = (
+            await session.execute(
+                select(User)
+                .where(
+                    User.telegram_user_id == telegram_id,
+                    User.company_id.is_not(None),
+                )
+                .options(selectinload(User.company))
+                .order_by(User.id.desc())
+            )
+        ).scalars().all()
+
+        employees = [
+            user for user in scoped_users
+            if user.role in (UserRole.director, UserRole.agent)
+        ]
+        if len(employees) == 1:
+            return employees[0]
+
+        global_user = await repo.get_by_telegram_id(telegram_id, company_id=None)
+        if global_user:
+            return global_user
+
+        if len(scoped_users) == 1:
+            return scoped_users[0]
+
+        return None
+
     async def __call__(
         self,
         handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
@@ -73,7 +117,13 @@ class AuthMiddleware(BaseMiddleware):
                     await session.commit()
                     await session.refresh(user)
             else:
-                user = await repo.get_by_telegram_id(tg_user.id, company_id=company_id)
+                preset_role = self._preset_role_for_telegram_id(tg_user.id)
+
+                if company_id is None:
+                    user = await self._get_user_without_company_context(session, repo, tg_user.id)
+                else:
+                    user = await repo.get_by_telegram_id(tg_user.id, company_id=company_id)
+
                 pending_agent = None
                 if company_id is not None and tg_user.username:
                     pending_agent = await repo.get_pending_agent_by_username(tg_user.username, company_id)
@@ -110,9 +160,17 @@ class AuthMiddleware(BaseMiddleware):
                         telegram_id=tg_user.id,
                         username=tg_user.username,
                         full_name=tg_user.full_name,
+                        role=preset_role if company_id is not None else UserRole.client,
                         company_id=company_id,
                     )
                 else:
+                    if (
+                        preset_role is not None
+                        and company_id is not None
+                        and user.company_id == company_id
+                        and user.role != preset_role
+                    ):
+                        user.role = preset_role
                     await session.execute(
                         sa_update(User)
                         .where(User.id == user.id)
