@@ -26,8 +26,9 @@ class SubscriptionMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        # Developer and clients are never blocked by subscription checks
-        if user.role in (UserRole.developer, UserRole.client):
+        # Developer, director, and clients are never blocked by subscription checks
+        # Director must always access payment flow to renew the subscription
+        if user.role in (UserRole.developer, UserRole.director, UserRole.client):
             return await handler(event, data)
 
         session = data.get("db_session")

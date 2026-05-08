@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     DEVELOPER_TELEGRAM_ID: int
     DEVELOPER_NAME: str = "Developer"
 
+    # Pre-configured director and agents (auto-registered on startup)
+    DIRECTOR_TELEGRAM_ID: Optional[int] = None
+    AGENT_1_TELEGRAM_ID: Optional[int] = None
+    AGENT_2_TELEGRAM_ID: Optional[int] = None
+    AGENT_3_TELEGRAM_ID: Optional[int] = None
+
     # OpenRouter AI
     OPENROUTER_API_KEY: str = "REPLACE_WITH_YOUR_API_KEY"
     OPENROUTER_MODEL: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"

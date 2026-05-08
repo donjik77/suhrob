@@ -1,10 +1,18 @@
 """Mortgage calculator handler."""
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 router = Router()
+
+
+async def _edit_or_answer(callback: CallbackQuery, text: str, reply_markup=None) -> None:
+    """Edit text if the message is a text-only message; answer new otherwise (e.g. photo messages)."""
+    if callback.message.photo or callback.message.video or callback.message.document:
+        await callback.message.answer(text, reply_markup=reply_markup)
+    else:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
 
 # Bank rates in %
 BANKS = [
@@ -41,11 +49,30 @@ def _term_kb(property_id: int, dp: int) -> InlineKeyboardMarkup:
 @router.callback_query(F.data.startswith("mortgage:"))
 async def show_down_payment(callback: CallbackQuery):
     property_id = int(callback.data.split(":")[1])
-    await callback.message.edit_text(
+    await _edit_or_answer(
+        callback,
         "💰 <b>Ipoteka kalkulyatori</b>\n\nBoshlang'ich to'lov necha foiz?",
         reply_markup=_down_kb(property_id),
     )
     await callback.answer()
+
+
+@router.message(MortgageState.down_payment)
+async def custom_down_payment(message: Message, state: FSMContext):
+    try:
+        dp = int(message.text.strip().replace("%", ""))
+        if not (1 <= dp <= 99):
+            raise ValueError
+    except (ValueError, AttributeError):
+        await message.answer("Iltimos, 1 dan 99 gacha bo'lgan raqam kiriting (masalan: 15):")
+        return
+    data = await state.get_data()
+    property_id = data.get("property_id", 0)
+    await state.clear()
+    await message.answer(
+        f"Boshlang'ich to'lov: <b>{dp}%</b>\nMuddat necha yil?",
+        reply_markup=_term_kb(property_id, dp),
+    )
 
 
 @router.callback_query(F.data.startswith("mort_dp:"))
@@ -109,7 +136,7 @@ async def show_calculation(callback: CallbackQuery):
         lines.append(f"   Jami: ~${total:,.0f}\n")
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📞 Agent bilan bog'lanish", callback_data=f"contact_agent:{property_id}")
+        InlineKeyboardButton(text="📞 Agent bilan bog'lanish", callback_data=f"prop_contact:{property_id}")
     ]])
     await callback.message.edit_text("\n".join(lines), reply_markup=kb)
     await callback.answer()
