@@ -38,12 +38,13 @@ async def _chat(messages: list[dict], max_tokens: int = 512) -> str:
 
 async def generate_property_description(data: dict) -> str:
     """Generate a selling property description in Uzbek (Latin) from raw fields."""
+    address = data.get('address', "ko'rsatilmagan")
     prompt = f"""Sen professional ko'chmas mulk agentisan. Quyidagi ma'lumotlar asosida sotuvchi tavsif yoz (o'zbek tilida, lotin yozuvida).
 
 Ma'lumotlar:
 - Tur: {data.get('property_type', '')}
 - Tuman: {data.get('district', '')}
-- Manzil: {data.get('address', 'ko\'rsatilmagan')}
+- Manzil: {address}
 - Xonalar: {data.get('rooms', '')}
 - Qavat: {data.get('floor', '')}/{data.get('total_floors', '')}
 - Maydon: {data.get('area', '')} m²
