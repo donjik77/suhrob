@@ -20,6 +20,8 @@ async def agent_stats(message: Message, db_user: User):
         now = datetime.utcnow()
         month_ago = now - timedelta(days=30)
 
+        from src.db.models import LeadAssignment
+
         # Count active props
         active_count = await session.scalar(
             select(func.count()).where(
@@ -33,6 +35,26 @@ async def agent_stats(message: Message, db_user: User):
             select(func.count()).where(
                 Property.agent_id == db_user.id,
                 Property.status == PropertyStatus.sold,
+            )
+        )
+
+        # Sum views_count and contacts_count across agent's properties
+        views_count = await session.scalar(
+            select(func.coalesce(func.sum(Property.views_count), 0)).where(
+                Property.agent_id == db_user.id,
+            )
+        )
+
+        contacts_count = await session.scalar(
+            select(func.coalesce(func.sum(Property.contacts_count), 0)).where(
+                Property.agent_id == db_user.id,
+            )
+        )
+
+        # Count leads assigned to this agent
+        leads_count = await session.scalar(
+            select(func.count()).where(
+                LeadAssignment.agent_user_id == db_user.id,
             )
         )
 
@@ -55,9 +77,9 @@ async def agent_stats(message: Message, db_user: User):
         "",
         t("stats_active_props", count=active_count or 0),
         t("stats_sold_props", count=sold_count or 0),
-        t("stats_views", count=0),
-        t("stats_inquiries", count=0),
-        t("stats_contacts", count=0),
+        t("stats_views", count=int(views_count or 0)),
+        t("stats_inquiries", count=int(leads_count or 0)),
+        t("stats_contacts", count=int(contacts_count or 0)),
     ]
 
     if top_searches:

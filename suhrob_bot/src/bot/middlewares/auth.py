@@ -74,8 +74,6 @@ class AuthMiddleware(BaseMiddleware):
                         await session.refresh(user)
                     await repo.update_last_active(tg_user.id)
 
-            data["db_user"] = user
-
             # Blocked users cannot use the bot (developer is never blocked)
             if user.is_blocked and user.role != UserRole.developer:
                 if isinstance(event, Message):
@@ -84,6 +82,7 @@ class AuthMiddleware(BaseMiddleware):
                     await event.answer("🔒 Hisob bloklangan", show_alert=True)
                 return
 
+            data["db_user"] = user
             data["db_session"] = session
 
             return await handler(event, data)

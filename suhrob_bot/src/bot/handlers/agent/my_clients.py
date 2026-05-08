@@ -2,6 +2,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.db.models import User, UserRole, LeadAssignment, LeadStatus, ClientProfile
@@ -10,6 +11,21 @@ from src.bot.filters.role import RoleFilter
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director))
+router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director))
+
+
+async def get_lead_for_agent(
+    lead_id: int,
+    agent: User,
+    session: AsyncSession,
+) -> LeadAssignment | None:
+    result = await session.execute(
+        select(LeadAssignment).where(
+            LeadAssignment.id == lead_id,
+            LeadAssignment.agent_user_id == agent.id
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 STATUS_LABELS = {
@@ -101,23 +117,22 @@ async def lead_detail(callback: CallbackQuery, db_user: User):
     lead_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
+        lead = await get_lead_for_agent(lead_id, db_user, session)
+        if not lead:
+            await callback.answer("❌ Bunday mijoz topilmadi yoki sizniki emas", show_alert=True)
+            return
+
+        # Load relations
         lead = (
             await session.execute(
                 select(LeadAssignment)
-                .where(
-                    LeadAssignment.id == lead_id,
-                    LeadAssignment.agent_user_id == db_user.id,
-                )
+                .where(LeadAssignment.id == lead_id)
                 .options(
                     selectinload(LeadAssignment.client),
                     selectinload(LeadAssignment.property),
                 )
             )
-        ).scalar_one_or_none()
-
-        if not lead:
-            await callback.answer("❌ Bunday mijoz topilmadi yoki sizniki emas", show_alert=True)
-            return
+        ).scalar_one()
 
         client = lead.client
         profile = (
@@ -167,13 +182,8 @@ async def update_lead_status(callback: CallbackQuery, db_user: User):
     new_status = LeadStatus(parts[2])
 
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import update as sa_update, select as sa_select
-        existing = (await session.execute(
-            sa_select(LeadAssignment).where(
-                LeadAssignment.id == lead_id,
-                LeadAssignment.agent_user_id == db_user.id,
-            )
-        )).scalar_one_or_none()
+        from sqlalchemy import update as sa_update
+        existing = await get_lead_for_agent(lead_id, db_user, session)
         if not existing:
             await callback.answer("❌ Bunday mijoz topilmadi yoki sizniki emas", show_alert=True)
             return

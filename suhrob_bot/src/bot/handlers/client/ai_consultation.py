@@ -19,6 +19,16 @@ router = Router()
 AI_DAILY_LIMIT = settings.AI_DAILY_LIMIT_PER_USER
 
 
+async def check_ai_limit(user_id: int, redis, daily_limit: int = AI_DAILY_LIMIT) -> tuple[bool, int]:
+    from datetime import datetime
+    today_key = datetime.utcnow().strftime("%Y-%m-%d")
+    key = f"ai_calls:{user_id}:{today_key}"
+    count = await redis.incr(key)
+    if count == 1:
+        await redis.expire(key, 86400)
+    return count <= daily_limit, count
+
+
 class ConsultState(StatesGroup):
     chatting = State()
 
@@ -30,7 +40,7 @@ class ConsultState(StatesGroup):
 @router.message(F.text.contains("Konsultatsiya"))
 async def start_consultation(message: Message, db_user: User, state: FSMContext):
     await state.set_state(ConsultState.chatting)
-    await state.update_data(property_id=None, msg_count=0)
+    await state.update_data(property_id=None)
     await message.answer(
         "🤖 <b>AI-konsultant</b>\n\n"
         "Salom! Sizga qanday ko'chmas mulk kerakligi haqida gapirib bering.\n"
@@ -44,7 +54,7 @@ async def start_consultation(message: Message, db_user: User, state: FSMContext)
 async def start_consultation_property(callback: CallbackQuery, db_user: User, state: FSMContext):
     property_id = int(callback.data.split(":")[1])
     await state.set_state(ConsultState.chatting)
-    await state.update_data(property_id=property_id, msg_count=0)
+    await state.update_data(property_id=property_id)
     await callback.message.answer(
         "🤖 <b>AI-konsultant</b>\n\nBu obyekt haqida savolingiz bormi?\n"
         "❌ Chiqish: /stop"
@@ -64,11 +74,22 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
         return
 
     fsm_data = await state.get_data()
-    msg_count: int = fsm_data.get("msg_count", 0)
     property_id: int | None = fsm_data.get("property_id")
 
-    if msg_count >= AI_DAILY_LIMIT:
-        await message.answer("⚠️ Bugungi AI so'rovlar limitiga yetdingiz. Ertaga urinib ko'ring.")
+    import redis.asyncio as aioredis
+    _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        allowed, count = await check_ai_limit(db_user.id, _redis)
+    finally:
+        await _redis.aclose()
+
+    if not allowed:
+        await message.answer(
+            f"🚫 <b>Kunlik limit tugadi</b>\n\n"
+            f"Siz bugun {count} ta xabar yubordingiz. "
+            f"Ertaga yana yozing yoki agent bilan bog'laning.",
+            parse_mode='HTML',
+        )
         return
 
     async with AsyncSessionFactory() as session:
@@ -143,7 +164,6 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
         if qualification.get("qualification_score", 0) >= 70:
             await _maybe_assign_hot_lead(session, db_user, qualification, message.bot)
 
-    await state.update_data(msg_count=msg_count + 1)
     await message.answer(reply)
 
 

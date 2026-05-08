@@ -185,6 +185,13 @@ async def receive_proof(message: Message, state: FSMContext, db_user: User):
     )
 
 
+@router.callback_query(F.data == "topup_cancel")
+async def cancel_topup(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ To'ldirish bekor qilindi.")
+    await callback.answer()
+
+
 @router.callback_query(F.data == "balance_history")
 async def balance_history(callback: CallbackQuery, db_user: User):
     async with AsyncSessionFactory() as session:

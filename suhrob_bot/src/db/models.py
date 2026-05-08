@@ -80,6 +80,7 @@ class TransactionStatus(str, enum.Enum):
 
 class ScheduledPostStatus(str, enum.Enum):
     pending = "pending"
+    in_progress = "in_progress"
     published = "published"
     failed = "failed"
 

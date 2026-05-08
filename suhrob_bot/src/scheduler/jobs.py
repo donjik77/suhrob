@@ -28,33 +28,51 @@ async def job_expire_subscriptions(bot: Bot) -> None:
 
 async def job_publish_scheduled_posts(bot: Bot) -> None:
     logger.info("scheduler_job_start", job="publish_scheduled_posts")
-    now = datetime.utcnow()
+    from sqlalchemy import select
+    from src.db.models import ScheduledPost, ScheduledPostStatus
+    from src.services.publisher_service import PublisherService
 
+    # Phase 1: atomically claim pending posts by marking them in_progress.
+    # FOR UPDATE SKIP LOCKED prevents duplicate processing on concurrent/restarted workers.
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import select
-        from src.db.models import ScheduledPost, ScheduledPostStatus
-        from src.services.publisher_service import PublisherService
-
-        result = await session.execute(
-            select(ScheduledPost).where(
-                ScheduledPost.status == ScheduledPostStatus.pending,
-                ScheduledPost.scheduled_at <= now,
+        async with session.begin():
+            stmt = (
+                select(ScheduledPost)
+                .where(
+                    ScheduledPost.status == ScheduledPostStatus.pending,
+                    ScheduledPost.scheduled_at <= datetime.utcnow(),
+                )
+                .with_for_update(skip_locked=True)
+                .limit(10)
             )
-        )
-        posts = list(result.scalars().all())
+            result = await session.execute(stmt)
+            posts = list(result.scalars())
 
-        for post in posts:
-            publisher = PublisherService(session, bot)
-            success, msg = await publisher.publish(post.property_id)
+            for post in posts:
+                post.status = ScheduledPostStatus.in_progress
+            # commit happens on context manager exit
 
-            if success:
-                post.status = ScheduledPostStatus.published
-                post.published_at = now
-            else:
-                post.status = ScheduledPostStatus.failed
-                post.error_message = msg
-
-        await session.commit()
+    # Phase 2: publish each claimed post and update final status.
+    for post in posts:
+        try:
+            async with AsyncSessionFactory() as s2:
+                publisher = PublisherService(session=s2, bot=bot)
+                success, msg = await publisher.publish(post.property_id)
+                p = await s2.get(ScheduledPost, post.id)
+                if success:
+                    p.status = ScheduledPostStatus.published
+                    p.published_at = datetime.utcnow()
+                else:
+                    p.status = ScheduledPostStatus.failed
+                    p.error_message = (msg or "")[:500]
+                await s2.commit()
+        except Exception as e:
+            async with AsyncSessionFactory() as s2:
+                p = await s2.get(ScheduledPost, post.id)
+                p.status = ScheduledPostStatus.failed
+                p.error_message = str(e)[:500]
+                await s2.commit()
+            logger.error("publish_scheduled_post_failed", post_id=post.id, error=str(e))
 
     logger.info("scheduler_job_done", job="publish_scheduled_posts", count=len(posts))
 

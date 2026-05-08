@@ -4,8 +4,9 @@ from typing import Optional
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from sqlalchemy import update
 
-from src.db.models import User, UserRole, PropertyType
+from src.db.models import User, UserRole, PropertyType, Company, Property
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
@@ -23,8 +24,9 @@ router = Router()
 
 
 @router.message(F.text == "🔵 🔍 Uy qidirish")
-async def start_search(message: Message, state: FSMContext, db_user: User):
+async def start_search(message: Message, state: FSMContext, db_user: User, company: Company):
     await state.clear()
+    await state.update_data(company_id=company.id)
     await state.set_state(SearchStates.choosing_type)
     await message.answer(t("search_type"), reply_markup=search_type_kb())
 
@@ -35,19 +37,21 @@ async def choose_type(callback: CallbackQuery, state: FSMContext):
     await state.update_data(property_type=ptype)
     await state.set_state(SearchStates.choosing_district)
 
+    data = await state.get_data()
+    company_id = data.get("company_id")
+
     async with AsyncSessionFactory() as session:
-        # Get company_id from user's company or use first active company
-        repo = PropertyRepository(session)
-        # For client search we need a company context — use all active districts for now
-        # In multi-tenant future this would be scoped
         from sqlalchemy import select
         from src.db.models import Property, PropertyStatus
-        result = await session.execute(
+        q = (
             select(Property.location_district)
             .where(Property.status == PropertyStatus.active)
             .distinct()
             .order_by(Property.location_district)
         )
+        if company_id:
+            q = q.where(Property.company_id == company_id)
+        result = await session.execute(q)
         districts = [row[0] for row in result.all()]
 
     await callback.message.edit_text(
@@ -119,6 +123,7 @@ async def enter_custom_price(message: Message, state: FSMContext):
 async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
     data = await state.get_data()
 
+    company_id: int = data.get("company_id")
     district: Optional[str] = data.get("district")
     rooms: Optional[int] = data.get("rooms")
     price_min = Decimal(data["price_min"]) if data.get("price_min") else None
@@ -132,6 +137,7 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
 
         search_svc = SearchService(session)
         props, exact = await search_svc.search(
+            company_id=company_id,
             district=district,
             price_min=price_min,
             price_max=price_max,
@@ -143,6 +149,17 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
         # (user_id needs to be threaded; skip for now, added in iteration 5)
 
     await state.set_state(SearchStates.showing_results)
+
+    # Increment views_count for all displayed properties
+    if props:
+        prop_ids = [p.id for p in props]
+        async with AsyncSessionFactory() as inc_session:
+            await inc_session.execute(
+                update(Property)
+                .where(Property.id.in_(prop_ids))
+                .values(views_count=Property.views_count + 1)
+            )
+            await inc_session.commit()
 
     if not props:
         text = t("results_none")
@@ -201,15 +218,20 @@ async def search_back(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(t("search_type"), reply_markup=search_type_kb())
     elif target == "district":
         await state.set_state(SearchStates.choosing_district)
+        back_data = await state.get_data()
+        back_company_id = back_data.get("company_id")
         async with AsyncSessionFactory() as session:
             from sqlalchemy import select
             from src.db.models import Property, PropertyStatus
-            result = await session.execute(
+            q = (
                 select(Property.location_district)
                 .where(Property.status == PropertyStatus.active)
                 .distinct()
                 .order_by(Property.location_district)
             )
+            if back_company_id:
+                q = q.where(Property.company_id == back_company_id)
+            result = await session.execute(q)
             districts = [row[0] for row in result.all()]
         await callback.message.edit_text(t("search_district"), reply_markup=search_district_kb(districts))
     elif target == "rooms":

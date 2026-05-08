@@ -30,6 +30,7 @@ from src.bot.handlers.agent.scheduled_posts import router as scheduled_posts_rou
 from src.bot.handlers.agent.stats import router as agent_stats_router
 from src.bot.handlers.agent.agent_settings import router as agent_settings_router
 from src.bot.handlers.agent.instagram import router as instagram_router
+from src.bot.handlers.shared.profile import router as shared_profile_router
 from src.bot.handlers.director.agents import router as director_agents_router
 from src.bot.handlers.director.subscription import router as subscription_router
 from src.bot.handlers.director.properties import router as director_properties_router
@@ -151,6 +152,7 @@ def register_routers(dp: Dispatcher) -> None:
     dp.include_router(agent_stats_router)
     dp.include_router(agent_settings_router)
     dp.include_router(instagram_router)
+    dp.include_router(shared_profile_router)
     dp.include_router(director_agents_router)
     dp.include_router(director_properties_router)
     dp.include_router(director_profile_router)

@@ -1,8 +1,15 @@
+import re as _re
+from datetime import datetime, timedelta
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters import StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import select as sa_select, func, distinct
 
-from src.db.models import User, UserRole
+from src.db.models import User, UserRole, Property, PropertyStatus
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.user_repo import UserRepository
 from src.bot.filters.role import RoleFilter
@@ -104,3 +111,178 @@ async def toggle_agent_block(callback: CallbackQuery, db_user: User):
     status = "bloklandi" if blocked else "blokdan chiqarildi"
     await callback.answer(f"Agent {status}", show_alert=True)
     await callback.message.delete()
+
+
+# ─── Add Agent FSM ────────────────────────────────────────────────────────────
+
+class AddAgentStates(StatesGroup):
+    waiting_full_name = State()
+    waiting_phone = State()
+    waiting_telegram = State()
+
+
+@router.callback_query(F.data == "add_agent")
+async def start_add_agent(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer(
+        "➕ <b>Yangi agent qo'shish</b>\n\n"
+        "1/3. Agentning to'liq ism va familiyasini kiriting:",
+        parse_mode='HTML',
+    )
+    await state.set_state(AddAgentStates.waiting_full_name)
+    await callback.answer()
+
+
+@router.message(StateFilter(AddAgentStates.waiting_full_name))
+async def add_agent_name(message: Message, state: FSMContext):
+    name = message.text.strip()
+    if len(name) < 3 or len(name) > 100:
+        await message.answer("❌ Ism noto'g'ri. Iltimos, qaytadan kiriting:")
+        return
+    await state.update_data(full_name=name)
+    await message.answer("2/3. Telefon raqamini kiriting (format: +998XXXXXXXXX):")
+    await state.set_state(AddAgentStates.waiting_phone)
+
+
+@router.message(StateFilter(AddAgentStates.waiting_phone))
+async def add_agent_phone(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    if not _re.match(r'^\+998\d{9}$', phone):
+        await message.answer("❌ Telefon noto'g'ri. Format: +998901234567\nQaytadan kiriting:")
+        return
+    await state.update_data(phone=phone)
+    await message.answer(
+        "3/3. Telegram username (@username) yoki Telegram ID:\n\n"
+        "💡 Agent o'z botida @userinfobot ga /start yuborsin"
+    )
+    await state.set_state(AddAgentStates.waiting_telegram)
+
+
+@router.message(StateFilter(AddAgentStates.waiting_telegram))
+async def add_agent_telegram(message: Message, state: FSMContext, db_user: User, bot):
+    text = message.text.strip()
+    telegram_user_id = None
+    username = None
+
+    if text.startswith('@'):
+        username = text[1:]
+    elif text.lstrip('-').isdigit():
+        telegram_user_id = int(text)
+    else:
+        await message.answer("❌ Format noto'g'ri. @username yoki raqam kiriting:")
+        return
+
+    data = await state.get_data()
+
+    async with AsyncSessionFactory() as session:
+        if telegram_user_id:
+            existing = await session.execute(
+                sa_select(User).where(User.telegram_user_id == telegram_user_id)
+            )
+            if existing.scalar_one_or_none():
+                await message.answer("❌ Bu Telegram ID allaqachon ro'yxatda bor")
+                await state.clear()
+                return
+
+        new_agent = User(
+            telegram_user_id=telegram_user_id or 0,
+            username=username,
+            full_name=data['full_name'],
+            phone=data['phone'],
+            role=UserRole.agent,
+            company_id=db_user.company_id,
+        )
+        session.add(new_agent)
+        await session.commit()
+        await session.refresh(new_agent)
+        new_agent_id = new_agent.id
+
+    sent = False
+    if telegram_user_id:
+        try:
+            invite_msg = (
+                f"👋 Salom, <b>{data['full_name']}</b>!\n\n"
+                f"Sizni kompaniyaga agent sifatida qo'shdilar.\n\n"
+                f"Botda ishlash uchun /start yuboring."
+            )
+            await bot.send_message(telegram_user_id, invite_msg, parse_mode='HTML')
+            sent = True
+        except Exception:
+            pass
+
+    summary = (
+        f"✅ <b>Agent yaratildi!</b>\n\n"
+        f"📛 Ism: {data['full_name']}\n"
+        f"📞 Telefon: {data['phone']}\n"
+        f"🆔 ID: {new_agent_id}\n"
+    )
+    if sent:
+        summary += "\n📨 Taklifnoma yuborildi"
+    elif username:
+        summary += f"\n💡 Iltiros, @{username} ga shu botning linkini yuboring"
+    else:
+        summary += "\n💡 Agent botga /start yuboradi va avtomatik avtorizatsiya bo'ladi"
+
+    await message.answer(summary, parse_mode='HTML')
+    await state.clear()
+
+
+@router.message(F.text.contains("reytingi"))
+async def agents_rating(message: Message, db_user: User):
+    if db_user.company_id is None:
+        await message.answer("Kompaniya topilmadi.")
+        return
+
+    period_start = datetime.utcnow() - timedelta(days=30)
+
+    async with AsyncSessionFactory() as session:
+        stmt = (
+            sa_select(
+                User.id,
+                User.full_name,
+                func.count(distinct(Property.id)).filter(
+                    Property.created_at >= period_start
+                ).label('new_properties'),
+                func.coalesce(func.sum(Property.views_count), 0).label('views'),
+                func.coalesce(func.sum(Property.contacts_count), 0).label('contacts'),
+                func.count(distinct(Property.id)).filter(
+                    Property.status == PropertyStatus.sold
+                ).label('sold'),
+            )
+            .outerjoin(Property, Property.agent_id == User.id)
+            .where(
+                User.role == UserRole.agent,
+                User.company_id == db_user.company_id,
+                User.is_blocked == False,
+            )
+            .group_by(User.id, User.full_name)
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
+
+    ranked = []
+    for row in rows:
+        views = int(row.views or 0)
+        contacts = int(row.contacts or 0)
+        sold = int(row.sold or 0)
+        new_props = int(row.new_properties or 0)
+        conversion = (sold / views * 100) if views > 0 else 0
+        contact_rate = (contacts / views * 100) if views > 0 else 0
+        score = min(100, int(conversion * 5 + contact_rate * 2 + new_props * 3))
+        ranked.append((row.full_name, new_props, views, contacts, sold, score))
+
+    ranked.sort(key=lambda r: r[5], reverse=True)
+    medals = ['🥇', '🥈', '🥉'] + ['🏅'] * 100
+    text = "<b>👥 Agentlar reytingi</b> (oxirgi 30 kun)\n\n"
+
+    for i, (name, new_props, views, contacts, sold, score) in enumerate(ranked):
+        text += (
+            f"{medals[i]} <b>{name}</b>\n"
+            f"   🏠 Yangi: {new_props}  👁 Ko'rishlar: {views}\n"
+            f"   📞 Bog'lanishlar: {contacts}  ✅ Sotilgan: {sold}\n"
+            f"   ⭐ Aktivlik: {score}/100\n\n"
+        )
+
+    if not ranked:
+        text += "Hozircha agentlar yo'q"
+
+    await message.answer(text, parse_mode='HTML')

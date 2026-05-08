@@ -3,8 +3,10 @@ import math
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.models import User, UserRole, PropertyStatus
+from src.db.models import User, UserRole, PropertyStatus, Property
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
@@ -18,6 +20,21 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 PAGE_SIZE = 5
+
+
+async def get_property_for_director(
+    property_id: int,
+    director: User,
+    session: AsyncSession,
+) -> Property | None:
+    company_id = await _get_company_id(director)
+    result = await session.execute(
+        select(Property).where(
+            Property.id == property_id,
+            Property.company_id == company_id,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # ─── All properties ───────────────────────────────────────────────────────────
@@ -106,16 +123,10 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
     property_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
-        repo = PropertyRepository(session)
-        prop = await repo.get_by_id(property_id)
+        prop = await get_property_for_director(property_id, db_user, session)
 
         if not prop:
-            await callback.answer("Uy topilmadi", show_alert=True)
-            return
-
-        company_id = await _get_company_id(db_user)
-        if prop.company_id != company_id:
-            await callback.answer("❌ Bu sizning kompaniyangizning obyekti emas", show_alert=True)
+            await callback.answer("❌ Uy topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
             return
 
         settings_repo = SettingsRepository(session)
@@ -141,9 +152,13 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
 
 
 @router.callback_query(F.data.startswith("all_prop_publish:"))
-async def publish_any(callback: CallbackQuery, bot: Bot):
+async def publish_any(callback: CallbackQuery, db_user: User, bot: Bot):
     property_id = int(callback.data.split(":")[1])
     async with AsyncSessionFactory() as session:
+        prop = await get_property_for_director(property_id, db_user, session)
+        if not prop:
+            await callback.answer("❌ Obyekt topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
+            return
         publisher = PublisherService(session, bot)
         success, msg = await publisher.publish(property_id)
     await callback.message.answer(msg)
@@ -151,14 +166,15 @@ async def publish_any(callback: CallbackQuery, bot: Bot):
 
 
 @router.callback_query(F.data.startswith("all_prop_delete:"))
-async def delete_any(callback: CallbackQuery):
+async def delete_any(callback: CallbackQuery, db_user: User):
     property_id = int(callback.data.split(":")[1])
     async with AsyncSessionFactory() as session:
-        repo = PropertyRepository(session)
-        prop = await repo.get_by_id(property_id)
-        if prop:
-            await session.delete(prop)
-            await session.commit()
+        prop = await get_property_for_director(property_id, db_user, session)
+        if not prop:
+            await callback.answer("❌ Obyekt topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
+            return
+        await session.delete(prop)
+        await session.commit()
     await callback.answer("🗑 O'chirildi", show_alert=True)
     await callback.message.delete()
 

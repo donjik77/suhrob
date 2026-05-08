@@ -142,7 +142,10 @@ async def back_to_companies(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("toggle_company:"))
-async def toggle_company(callback: CallbackQuery):
+async def toggle_company(callback: CallbackQuery, db_user: User):
+    if db_user.role != UserRole.developer:
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
     company_id = int(callback.data.split(":")[1])
     async with AsyncSessionFactory() as session:
         from sqlalchemy import update as sa_update

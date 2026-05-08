@@ -20,6 +20,9 @@ router.callback_query.filter(RoleFilter(UserRole.developer))
 
 @router.callback_query(F.data.startswith("dev_pay_confirm:"))
 async def confirm_payment(callback: CallbackQuery, db_user: User, bot: Bot):
+    if db_user.role != UserRole.developer:
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
     sub_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
@@ -121,7 +124,10 @@ async def issue_invoice(message: Message, db_user: User):
 
 
 @router.callback_query(F.data.startswith("invoice_company:"))
-async def invoice_select_company(callback: CallbackQuery, state: FSMContext):
+async def invoice_select_company(callback: CallbackQuery, state: FSMContext, db_user: User):
+    if db_user.role != UserRole.developer:
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
     company_id = int(callback.data.split(":")[1])
     await state.update_data(invoice_company_id=company_id)
 
@@ -138,7 +144,10 @@ async def invoice_select_company(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("invoice_amount:"))
-async def invoice_select_amount(callback: CallbackQuery, state: FSMContext):
+async def invoice_select_amount(callback: CallbackQuery, state: FSMContext, db_user: User):
+    if db_user.role != UserRole.developer:
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
     amount_val = callback.data.split(":")[1]
     if amount_val == "custom":
         await state.set_state(PaymentStates.entering_custom_amount)

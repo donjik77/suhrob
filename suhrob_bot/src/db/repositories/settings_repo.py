@@ -30,6 +30,13 @@ class SettingsRepository:
         row = result.scalar_one_or_none()
         return row if row is not None else default
 
+    async def get_int(self, key: str, default: int = 0) -> int:
+        val = await self.get(key)
+        try:
+            return int(val) if val else default
+        except (ValueError, TypeError):
+            return default
+
     async def get_float(self, key: str, default: float = 0.0) -> float:
         val = await self.get(key)
         try:

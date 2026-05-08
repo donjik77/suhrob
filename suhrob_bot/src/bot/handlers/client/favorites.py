@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 
-from src.db.models import User
+from src.db.models import User, Company, Property, PropertyStatus, LeadAssignment, LeadStatus
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.settings_repo import SettingsRepository
 from src.db.repositories.property_repo import PropertyRepository
@@ -99,16 +99,47 @@ async def remove_from_favorites(callback: CallbackQuery, db_user: User):
 
 
 @router.callback_query(F.data.startswith("prop_contact:"))
-async def contact_agent(callback: CallbackQuery, db_user: User):
+async def contact_agent(callback: CallbackQuery, db_user: User, company: Company):
     property_id = int(callback.data.split(":")[1])
 
     async with AsyncSessionFactory() as session:
-        prop_repo = PropertyRepository(session)
-        prop = await prop_repo.get_by_id(property_id)
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        result = await session.execute(
+            select(Property).where(
+                Property.id == property_id,
+                Property.status == PropertyStatus.active,
+                Property.company_id == company.id,
+            ).options(selectinload(Property.agent))
+        )
+        prop = result.scalar_one_or_none()
+        if not prop:
+            await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
+            return
 
-        if not prop or not prop.agent:
+        if not prop.agent:
             await callback.answer("Agent topilmadi", show_alert=True)
             return
+
+        # Create lead if not already exists for this client+property
+        from sqlalchemy import select as _select
+        existing_lead = (await session.execute(
+            _select(LeadAssignment).where(
+                LeadAssignment.client_user_id == db_user.id,
+                LeadAssignment.property_id == prop.id,
+            )
+        )).scalar_one_or_none()
+
+        if not existing_lead:
+            lead = LeadAssignment(
+                client_user_id=db_user.id,
+                agent_user_id=prop.agent_id,
+                property_id=prop.id,
+                status=LeadStatus.new,
+            )
+            session.add(lead)
+            prop.contacts_count += 1
+            await session.commit()
 
         agent = prop.agent
         username_str = f"@{agent.username}" if agent.username else "(username yo'q)"

@@ -101,10 +101,12 @@ TEXTS = {
         "btn_instagram": "🟣 📷 Instagram ulash",
         # Director main menu additions
         "btn_agents_management": "🔵 👥 Agentlar boshqaruvi",
+        "btn_agent_rating": "🔵 👥 Agentlar reytingi",
         "btn_all_properties": "🔵 🏢 Barcha uylar",
         "btn_subscription": "🟠 💳 Obuna holati",
         "btn_full_stats": "🔵 📈 To'liq statistika",
         "btn_my_profile": "🟠 👤 Mening profilim",
+        "btn_shared_profile": "🔵 ⚙️ Mening profilim",
         # Developer main menu additions
         "btn_issue_invoice": "🟠 💰 Hisob chiqarish",
         "btn_confirm_payments": "🟢 ✅ To'lovlarni tasdiqlash",

@@ -25,6 +25,7 @@ class SearchService:
 
     async def search(
         self,
+        company_id: int,
         district: Optional[str] = None,
         price_min: Optional[Decimal] = None,
         price_max: Optional[Decimal] = None,
@@ -36,15 +37,16 @@ class SearchService:
         Returns (properties, is_exact_match).
         Tries exact match first; falls back to similar properties.
         """
-        props = await self._query(district, price_min, price_max, rooms, property_type, limit)
+        props = await self._query(company_id, district, price_min, price_max, rooms, property_type, limit)
         if props:
             return props, True
 
-        similar = await self._search_similar(district, price_min, price_max, rooms, property_type, limit)
+        similar = await self._search_similar(company_id, district, price_min, price_max, rooms, property_type, limit)
         return similar, False
 
     async def _query(
         self,
+        company_id: int,
         district: Optional[str],
         price_min: Optional[Decimal],
         price_max: Optional[Decimal],
@@ -55,6 +57,7 @@ class SearchService:
         q = (
             select(Property)
             .where(Property.status == PropertyStatus.active)
+            .where(Property.company_id == company_id)
             .options(selectinload(Property.media), selectinload(Property.agent))
             .order_by(Property.created_at.desc())
             .limit(limit)
@@ -75,6 +78,7 @@ class SearchService:
 
     async def _search_similar(
         self,
+        company_id: int,
         district: Optional[str],
         price_min: Optional[Decimal],
         price_max: Optional[Decimal],
@@ -101,6 +105,7 @@ class SearchService:
         q = (
             select(Property)
             .where(Property.status == PropertyStatus.active)
+            .where(Property.company_id == company_id)
             .options(selectinload(Property.media), selectinload(Property.agent))
             .order_by(Property.created_at.desc())
             .limit(limit * 3)

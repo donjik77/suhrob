@@ -31,9 +31,11 @@ def agent_menu_kb(role: UserRole) -> ReplyKeyboardMarkup:
     kb.button(text=t("btn_stats"))
     kb.button(text=t("btn_settings"))
     kb.button(text=t("btn_instagram"))
+    kb.button(text=t("btn_shared_profile"))
 
     if role in (UserRole.director, UserRole.developer):
         kb.button(text=t("btn_agents_management"))
+        kb.button(text=t("btn_agent_rating"))
         kb.button(text=t("btn_all_properties"))
         kb.button(text=t("btn_my_profile"))
         kb.button(text=t("btn_full_stats"))
