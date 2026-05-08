@@ -31,6 +31,16 @@ EDIT_FIELD_PROMPTS = {
 }
 EDIT_INT_FIELDS = {"rooms", "floor", "total_floors"}
 
+
+def _owns_property(prop: "Property", db_user: "User") -> bool:
+    """True if user is allowed to mutate this property."""
+    if db_user.role == UserRole.developer:
+        return True
+    if db_user.role == UserRole.director:
+        return prop.company_id == db_user.company_id
+    return prop.agent_id == db_user.id
+
+
 router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
@@ -117,6 +127,10 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
             await callback.answer("Uy topilmadi", show_alert=True)
             return
 
+        if action != "view" and not _owns_property(prop, db_user):
+            await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+            return
+
         if action == "view":
             settings_repo = SettingsRepository(session)
             rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
@@ -174,12 +188,17 @@ async def start_edit_field(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("edit_prop_type:"))
-async def save_prop_type(callback: CallbackQuery):
+async def save_prop_type(callback: CallbackQuery, db_user: User):
     _, prop_id_str, ptype = callback.data.split(":", 2)
     prop_id = int(prop_id_str)
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import update as sa_update
+        repo = PropertyRepository(session)
+        prop = await repo.get_by_id(prop_id)
+        if not prop or not _owns_property(prop, db_user):
+            await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+            return
         await session.execute(
             sa_update(Property)
             .where(Property.id == prop_id)
@@ -194,7 +213,7 @@ async def save_prop_type(callback: CallbackQuery):
 
 
 @router.message(EditExistingPropertyStates.entering_field_value, F.text)
-async def save_edit_field_value(message: Message, state: FSMContext):
+async def save_edit_field_value(message: Message, state: FSMContext, db_user: User):
     data = await state.get_data()
     prop_id: int = data["edit_prop_id"]
     field: str = data["edit_field"]
@@ -225,6 +244,12 @@ async def save_edit_field_value(message: Message, state: FSMContext):
 
     async with AsyncSessionFactory() as session:
         from sqlalchemy import update as sa_update
+        repo = PropertyRepository(session)
+        prop = await repo.get_by_id(prop_id)
+        if not prop or not _owns_property(prop, db_user):
+            await message.answer("❌ Bu sizning obyektingiz emas")
+            await state.clear()
+            return
         await session.execute(
             sa_update(Property).where(Property.id == prop_id).values(**{field: value})
         )
@@ -242,6 +267,10 @@ async def set_property_status(callback: CallbackQuery, db_user: User):
 
     async with AsyncSessionFactory() as session:
         repo = PropertyRepository(session)
+        prop = await repo.get_by_id(property_id)
+        if not prop or not _owns_property(prop, db_user):
+            await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+            return
         await repo.update_status(property_id, new_status)
 
     status_label = t(f"prop_status_{new_status.value}")
@@ -257,6 +286,9 @@ async def confirm_delete(callback: CallbackQuery, db_user: User):
         repo = PropertyRepository(session)
         prop = await repo.get_by_id(property_id)
         if prop:
+            if not _owns_property(prop, db_user):
+                await callback.answer("❌ Bu sizning obyektingiz emas", show_alert=True)
+                return
             await session.delete(prop)
             await session.commit()
 

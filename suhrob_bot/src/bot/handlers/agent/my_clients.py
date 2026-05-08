@@ -104,7 +104,10 @@ async def lead_detail(callback: CallbackQuery, db_user: User):
         lead = (
             await session.execute(
                 select(LeadAssignment)
-                .where(LeadAssignment.id == lead_id)
+                .where(
+                    LeadAssignment.id == lead_id,
+                    LeadAssignment.agent_user_id == db_user.id,
+                )
                 .options(
                     selectinload(LeadAssignment.client),
                     selectinload(LeadAssignment.property),
@@ -113,7 +116,7 @@ async def lead_detail(callback: CallbackQuery, db_user: User):
         ).scalar_one_or_none()
 
         if not lead:
-            await callback.answer("Topilmadi.", show_alert=True)
+            await callback.answer("❌ Bunday mijoz topilmadi yoki sizniki emas", show_alert=True)
             return
 
         client = lead.client
@@ -164,7 +167,16 @@ async def update_lead_status(callback: CallbackQuery, db_user: User):
     new_status = LeadStatus(parts[2])
 
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import update as sa_update
+        from sqlalchemy import update as sa_update, select as sa_select
+        existing = (await session.execute(
+            sa_select(LeadAssignment).where(
+                LeadAssignment.id == lead_id,
+                LeadAssignment.agent_user_id == db_user.id,
+            )
+        )).scalar_one_or_none()
+        if not existing:
+            await callback.answer("❌ Bunday mijoz topilmadi yoki sizniki emas", show_alert=True)
+            return
         await session.execute(
             sa_update(LeadAssignment)
             .where(LeadAssignment.id == lead_id)

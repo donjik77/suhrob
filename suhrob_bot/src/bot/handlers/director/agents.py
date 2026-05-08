@@ -50,12 +50,15 @@ async def manage_agent(callback: CallbackQuery, db_user: User):
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
         result = await session.execute(
-            select(User).where(User.id == agent_id)
+            select(User).where(
+                User.id == agent_id,
+                User.company_id == db_user.company_id,
+            )
         )
         agent = result.scalar_one_or_none()
 
     if not agent:
-        await callback.answer("Agent topilmadi", show_alert=True)
+        await callback.answer("Agent topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
         return
 
     name = agent.full_name or agent.username or str(agent.telegram_user_id)
@@ -74,13 +77,25 @@ async def manage_agent(callback: CallbackQuery, db_user: User):
 
 
 @router.callback_query(F.data.startswith("agent_block:"))
-async def toggle_agent_block(callback: CallbackQuery):
+async def toggle_agent_block(callback: CallbackQuery, db_user: User):
     parts = callback.data.split(":")
     agent_id = int(parts[1])
     blocked = parts[2] == "1"
 
     async with AsyncSessionFactory() as session:
-        from sqlalchemy import update
+        from sqlalchemy import select, update
+        target = (await session.execute(
+            select(User).where(
+                User.id == agent_id,
+                User.company_id == db_user.company_id,
+                User.role == UserRole.agent,
+            )
+        )).scalar_one_or_none()
+
+        if not target:
+            await callback.answer("❌ Agent topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
+            return
+
         await session.execute(
             update(User).where(User.id == agent_id).values(is_blocked=blocked)
         )

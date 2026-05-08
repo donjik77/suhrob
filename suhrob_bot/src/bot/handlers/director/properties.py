@@ -113,6 +113,11 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
             await callback.answer("Uy topilmadi", show_alert=True)
             return
 
+        company_id = await _get_company_id(db_user)
+        if prop.company_id != company_id:
+            await callback.answer("❌ Bu sizning kompaniyangizning obyekti emas", show_alert=True)
+            return
+
         settings_repo = SettingsRepository(session)
         rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
         card = format_property_card(prop, rate)

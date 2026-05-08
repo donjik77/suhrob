@@ -16,6 +16,7 @@ from src.config import settings
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.developer))
+router.callback_query.filter(RoleFilter(UserRole.developer))
 
 
 class AddCompanyState(StatesGroup):

@@ -23,12 +23,12 @@ class SettingsRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
         result = await self.session.execute(
             select(BotSetting.value).where(BotSetting.key == key)
         )
         row = result.scalar_one_or_none()
-        return row
+        return row if row is not None else default
 
     async def get_float(self, key: str, default: float = 0.0) -> float:
         val = await self.get(key)
