@@ -337,11 +337,12 @@ async def _send_invoice(event, state: FSMContext, amount_usd: int):
         sub.status = SubscriptionStatus.pending_payment
         await session.commit()
 
-        # Notify all company users
+        # Notify staff only. Clients should not receive company subscription invoices.
         user_repo = UserRepository(session)
-        users = await user_repo.get_company_users(company_id)
+        all_users = await user_repo.get_company_users(company_id)
+        users = [u for u in all_users if u.role in (UserRole.agent, UserRole.director)]
 
-        from src.bot.keyboards.payment import payment_method_kb
+        from src.bot.keyboards.payment import invoice_payment_method_kb
         invoice_text = (
             f"💳 To'lov uchun hisob\n\n"
             f"Summa: ${amount_usd} (~{price_uzs:,} so'm)\n"
@@ -353,7 +354,7 @@ async def _send_invoice(event, state: FSMContext, amount_usd: int):
                 await bot.send_message(
                     chat_id=u.telegram_user_id,
                     text=invoice_text,
-                    reply_markup=payment_method_kb(),
+                    reply_markup=invoice_payment_method_kb(sub.id),
                 )
             except Exception:
                 pass

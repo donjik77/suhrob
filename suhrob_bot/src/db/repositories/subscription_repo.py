@@ -43,6 +43,10 @@ class SubscriptionRepository:
         return result.scalar_one_or_none()
 
     async def is_blocked(self, company_id: int) -> bool:
+        active = await self.get_active(company_id)
+        if active is not None:
+            return False
+
         sub = await self.get_latest(company_id)
         if sub is None:
             return True

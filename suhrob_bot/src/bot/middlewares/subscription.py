@@ -25,9 +25,14 @@ class SubscriptionMiddleware(BaseMiddleware):
                 callback_data == "pay_start"
                 or callback_data == "pay_cancel"
                 or callback_data.startswith("pay_method:")
+                or callback_data.startswith("pay_invoice_method:")
             )
 
         if isinstance(event, Message):
+            text = event.text or ""
+            if text.startswith("/start"):
+                return True
+
             state: FSMContext | None = data.get("state")
             if state is not None:
                 return await state.get_state() == PaymentStates.waiting_proof.state

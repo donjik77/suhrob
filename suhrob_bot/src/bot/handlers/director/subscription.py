@@ -105,6 +105,33 @@ async def start_payment(callback: CallbackQuery, state: FSMContext, db_user: Use
 @router.callback_query(F.data.startswith("pay_method:"))
 async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_user: User):
     method = callback.data.split(":")[1]
+    await _show_payment_method(callback, state, db_user, method)
+
+
+@router.callback_query(F.data.startswith("pay_invoice_method:"))
+async def choose_invoice_payment_method(callback: CallbackQuery, state: FSMContext, db_user: User):
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.answer("To'lov so'rovi noto'g'ri", show_alert=True)
+        return
+
+    try:
+        subscription_id = int(parts[1])
+    except ValueError:
+        await callback.answer("To'lov ID noto'g'ri", show_alert=True)
+        return
+
+    method = parts[2]
+    await _show_payment_method(callback, state, db_user, method, subscription_id=subscription_id)
+
+
+async def _show_payment_method(
+    callback: CallbackQuery,
+    state: FSMContext,
+    db_user: User,
+    method: str,
+    subscription_id: int | None = None,
+) -> None:
     if method not in CARD_PAYMENT_METHODS and method != PaymentMethod.crypto.value:
         await callback.answer("To'lov usuli noto'g'ri", show_alert=True)
         return
@@ -114,11 +141,27 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
 
     async with AsyncSessionFactory() as session:
         settings_repo = SettingsRepository(session)
-        company_id = await resolve_actor_company_id(db_user)
         sub = None
-        if company_id is not None:
-            sub_repo = SubscriptionRepository(session)
-            sub = await sub_repo.get_latest(company_id)
+        company_id = None
+        sub_repo = SubscriptionRepository(session)
+
+        if subscription_id is not None:
+            sub = await sub_repo.get_by_id(subscription_id)
+            if sub is None:
+                await callback.answer("Hisob topilmadi", show_alert=True)
+                return
+            if db_user.role != UserRole.developer and db_user.company_id != sub.company_id:
+                await callback.answer("Bu hisob sizning kompaniyangizga tegishli emas", show_alert=True)
+                return
+            company_id = sub.company_id
+        else:
+            company_id = await resolve_actor_company_id(db_user)
+            if company_id is not None:
+                sub = await sub_repo.get_latest(company_id)
+
+        if company_id is None:
+            await callback.answer("Kompaniya topilmadi", show_alert=True)
+            return
 
         price_usd = (
             float(sub.price_usd)
@@ -153,7 +196,12 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
             )
 
     await state.set_state(PaymentStates.waiting_proof)
-    await state.update_data(price_usd=price_usd, price_uzs=price_uzs)
+    await state.update_data(
+        price_usd=price_usd,
+        price_uzs=price_uzs,
+        payment_subscription_id=subscription_id,
+        payment_company_id=company_id,
+    )
 
     await _send_payment_instruction(callback, text, qr_file_id)
     await callback.answer()
@@ -164,8 +212,11 @@ async def receive_payment_proof(message: Message, state: FSMContext, db_user: Us
     data = await state.get_data()
     method = data.get("payment_method", "")
     price_usd = data.get("price_usd", 49)
+    subscription_id = data.get("payment_subscription_id")
     file_id = message.photo[-1].file_id
     company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
+        company_id = data.get("payment_company_id")
     if company_id is None:
         await message.answer("Kompaniya topilmadi.")
         await state.clear()
@@ -173,7 +224,12 @@ async def receive_payment_proof(message: Message, state: FSMContext, db_user: Us
 
     async with AsyncSessionFactory() as session:
         sub_repo = SubscriptionRepository(session)
-        sub = await sub_repo.get_latest(company_id)
+        sub = await sub_repo.get_by_id(subscription_id) if subscription_id else await sub_repo.get_latest(company_id)
+
+        if sub is not None and sub.company_id != company_id:
+            await message.answer("❌ To'lov hisobi kompaniyaga mos kelmadi. Iltimos, qaytadan boshlang.")
+            await state.clear()
+            return
 
         if sub is None:
             sub = await sub_repo.create(company_id, price_usd=price_usd)

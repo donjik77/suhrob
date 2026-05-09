@@ -15,6 +15,17 @@ def payment_method_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def invoice_payment_method_kb(subscription_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=t("btn_pay_click"), callback_data=f"pay_invoice_method:{subscription_id}:click")
+    builder.button(text=t("btn_pay_humo"), callback_data=f"pay_invoice_method:{subscription_id}:humo")
+    builder.button(text=t("btn_pay_uzcard"), callback_data=f"pay_invoice_method:{subscription_id}:uzcard")
+    builder.button(text=t("btn_pay_crypto"), callback_data=f"pay_invoice_method:{subscription_id}:crypto")
+    builder.button(text=t("cancel"), callback_data="pay_cancel")
+    builder.adjust(2, 2, 1)
+    return builder.as_markup()
+
+
 def cancel_payment_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=t("cancel"), callback_data="pay_cancel")

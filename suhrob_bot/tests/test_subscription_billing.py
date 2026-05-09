@@ -8,6 +8,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/
 os.environ.setdefault("DEVELOPER_TELEGRAM_ID", "1")
 
 from src.bot.keyboards.agent import publish_options_kb
+from src.bot.keyboards.payment import invoice_payment_method_kb
 from src.db.models import SubscriptionStatus
 from src.db.repositories.subscription_repo import SubscriptionRepository
 
@@ -17,8 +18,12 @@ def _now():
 
 
 class _Repo(SubscriptionRepository):
-    def __init__(self, sub):
+    def __init__(self, sub, active=None):
         self.sub = sub
+        self.active = active
+
+    async def get_active(self, company_id: int):
+        return self.active
 
     async def get_latest(self, company_id: int):
         return self.sub
@@ -42,7 +47,16 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
             status=SubscriptionStatus.active,
             period_end=_now() + timedelta(days=1),
         )
-        self.assertFalse(await _Repo(active).is_blocked(1))
+        self.assertFalse(await _Repo(active, active=active).is_blocked(1))
+
+    async def test_pending_invoice_does_not_block_while_active_subscription_exists(self):
+        active = SimpleNamespace(
+            status=SubscriptionStatus.active,
+            period_end=_now() + timedelta(days=5),
+        )
+        pending_invoice = SimpleNamespace(status=SubscriptionStatus.pending_payment, period_end=None)
+
+        self.assertFalse(await _Repo(pending_invoice, active=active).is_blocked(1))
 
     def test_profile_subscription_queries_are_limited(self):
         source = Path("src/bot/handlers/director/profile.py").read_text(encoding="utf-8")
@@ -51,8 +65,34 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SubscriptionType.instagram", source)
         self.assertGreaterEqual(source.count(".limit(1)"), 2)
 
+    def test_subscription_middleware_covers_agents_and_allows_start(self):
+        source = Path("src/bot/middlewares/subscription.py").read_text(encoding="utf-8")
+
+        self.assertIn("UserRole.agent, UserRole.director", source)
+        self.assertIn('text.startswith("/start")', source)
+        self.assertIn('callback_data.startswith("pay_invoice_method:")', source)
+
+    def test_invoice_sender_targets_staff_with_invoice_specific_buttons(self):
+        source = Path("src/bot/handlers/developer/payments.py").read_text(encoding="utf-8")
+
+        self.assertIn("u.role in (UserRole.agent, UserRole.director)", source)
+        self.assertIn("invoice_payment_method_kb(sub.id)", source)
+
+    def test_invoice_payment_handler_exists(self):
+        source = Path("src/bot/handlers/director/subscription.py").read_text(encoding="utf-8")
+
+        self.assertIn('F.data.startswith("pay_invoice_method:")', source)
+
 
 class PublishKeyboardTest(unittest.TestCase):
+    def test_invoice_payment_buttons_carry_subscription_id(self):
+        kb = invoice_payment_method_kb(77)
+
+        self.assertEqual(kb.inline_keyboard[0][0].callback_data, "pay_invoice_method:77:click")
+        self.assertEqual(kb.inline_keyboard[0][1].callback_data, "pay_invoice_method:77:humo")
+        self.assertEqual(kb.inline_keyboard[1][0].callback_data, "pay_invoice_method:77:uzcard")
+        self.assertEqual(kb.inline_keyboard[1][1].callback_data, "pay_invoice_method:77:crypto")
+
     def test_publish_buttons_carry_property_id(self):
         kb = publish_options_kb(42)
 

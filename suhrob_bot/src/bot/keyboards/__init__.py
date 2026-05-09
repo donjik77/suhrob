@@ -19,6 +19,7 @@ from src.bot.keyboards.agent import (
 )
 from src.bot.keyboards.payment import (
     payment_method_kb,
+    invoice_payment_method_kb,
     cancel_payment_kb,
     payment_confirm_kb,
     invoice_amount_kb,
@@ -41,6 +42,7 @@ __all__ = [
     "property_status_kb",
     "add_district_kb",
     "payment_method_kb",
+    "invoice_payment_method_kb",
     "cancel_payment_kb",
     "payment_confirm_kb",
     "invoice_amount_kb",
