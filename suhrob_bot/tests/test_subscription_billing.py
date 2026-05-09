@@ -44,6 +44,13 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(await _Repo(active).is_blocked(1))
 
+    def test_profile_subscription_queries_are_limited(self):
+        source = Path("src/bot/handlers/director/profile.py").read_text(encoding="utf-8")
+
+        self.assertIn("SubscriptionType.base", source)
+        self.assertIn("SubscriptionType.instagram", source)
+        self.assertGreaterEqual(source.count(".limit(1)"), 2)
+
 
 class PublishKeyboardTest(unittest.TestCase):
     def test_publish_buttons_carry_property_id(self):

@@ -20,7 +20,7 @@ async def instagram_menu(message: Message, db_user: User):
                     Subscription.company_id == db_user.company_id,
                     Subscription.subscription_type == SubscriptionType.instagram,
                     Subscription.status == SubscriptionStatus.active,
-                )
+                ).order_by(Subscription.period_end.desc(), Subscription.created_at.desc()).limit(1)
             )
         ).scalar_one_or_none()
 

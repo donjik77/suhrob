@@ -36,7 +36,7 @@ async def director_profile(message: Message, db_user: User):
                     Subscription.subscription_type == SubscriptionType.base,
                     Subscription.status == SubscriptionStatus.active,
                     Subscription.period_end >= now,
-                ).order_by(Subscription.period_end.desc())
+                ).order_by(Subscription.period_end.desc(), Subscription.created_at.desc()).limit(1)
             )
         ).scalar_one_or_none()
 
@@ -47,7 +47,7 @@ async def director_profile(message: Message, db_user: User):
                     Subscription.subscription_type == SubscriptionType.instagram,
                     Subscription.status == SubscriptionStatus.active,
                     Subscription.period_end >= now,
-                )
+                ).order_by(Subscription.period_end.desc(), Subscription.created_at.desc()).limit(1)
             )
         ).scalar_one_or_none()
         company = await session.get(Company, company_id) if company_id else None

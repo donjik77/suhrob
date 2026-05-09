@@ -100,7 +100,7 @@ async def company_detail(callback: CallbackQuery):
                 Subscription.company_id == company_id,
                 Subscription.subscription_type == SubscriptionType.base,
                 Subscription.status == SubscriptionStatus.active,
-            ).order_by(Subscription.period_end.desc())
+            ).order_by(Subscription.period_end.desc(), Subscription.created_at.desc()).limit(1)
         )).scalar_one_or_none()
 
         # Director
