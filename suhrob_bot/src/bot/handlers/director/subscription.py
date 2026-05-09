@@ -19,6 +19,13 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
+CARD_PAYMENT_METHODS = {
+    PaymentMethod.click.value,
+    PaymentMethod.humo.value,
+    PaymentMethod.uzcard.value,
+}
+
+
 async def _send_payment_instruction(callback: CallbackQuery, text: str, qr_file_id: str | None = None) -> None:
     if qr_file_id:
         try:
@@ -32,6 +39,15 @@ async def _send_payment_instruction(callback: CallbackQuery, text: str, qr_file_
             pass
 
     await callback.message.answer(text, reply_markup=cancel_payment_kb())
+
+
+async def _get_card_qr_file_id(settings_repo: SettingsRepository, method: str) -> str | None:
+    return (
+        await settings_repo.get(f"payment_{method}_qr_file_id")
+        or await settings_repo.get(f"payment_{method}_qr_photo")
+        or await settings_repo.get("payment_card_qr_file_id")
+        or await settings_repo.get("payment_card_qr_photo")
+    )
 
 
 @router.message(F.text == "💳 Obuna holati")
@@ -77,15 +93,29 @@ async def start_payment(callback: CallbackQuery, state: FSMContext, db_user: Use
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("pay_method:"), PaymentStates.choosing_method)
+@router.callback_query(F.data.startswith("pay_method:"))
 async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_user: User):
     method = callback.data.split(":")[1]
+    if method not in CARD_PAYMENT_METHODS and method != PaymentMethod.crypto.value:
+        await callback.answer("To'lov usuli noto'g'ri", show_alert=True)
+        return
+
     await state.update_data(payment_method=method)
     qr_file_id = None
 
     async with AsyncSessionFactory() as session:
         settings_repo = SettingsRepository(session)
-        price_usd = await settings_repo.get_float("monthly_price_usd", 49.0)
+        company_id = await resolve_actor_company_id(db_user)
+        sub = None
+        if company_id is not None:
+            sub_repo = SubscriptionRepository(session)
+            sub = await sub_repo.get_latest(company_id)
+
+        price_usd = (
+            float(sub.price_usd)
+            if sub and sub.price_usd
+            else await settings_repo.get_float("monthly_price_usd", 49.0)
+        )
         rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
         price_uzs = usd_to_uzs(price_usd, rate)
 
@@ -96,10 +126,7 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
         else:
             card = await settings_repo.get(f"payment_{method}_card") or "—"
             holder = await settings_repo.get(f"payment_{method}_holder") or "—"
-            qr_file_id = (
-                await settings_repo.get(f"payment_{method}_qr_file_id")
-                or await settings_repo.get(f"payment_{method}_qr_photo")
-            )
+            qr_file_id = await _get_card_qr_file_id(settings_repo, method)
             text = t(
                 "payment_instructions_card",
                 method=method.upper(),

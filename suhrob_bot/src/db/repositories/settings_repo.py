@@ -20,6 +20,7 @@ DEFAULT_SETTINGS = {
     "payment_uzcard_card": "",
     "payment_uzcard_holder": "",
     "payment_uzcard_qr_file_id": "",
+    "payment_card_qr_file_id": "",
     "payment_crypto_address": "",
     "payment_crypto_network": "USDT TRC-20",
 }
@@ -70,11 +71,14 @@ def _env_candidates(key: str) -> list[str]:
 
 
 def _get_env_fallback(key: str) -> Optional[str]:
-    dotenv_values = _load_dotenv_values()
-    for candidate in _env_candidates(key):
+    candidates = _env_candidates(key)
+    for candidate in candidates:
         value = os.environ.get(candidate)
         if value:
             return value
+
+    dotenv_values = _load_dotenv_values()
+    for candidate in candidates:
         value = dotenv_values.get(candidate)
         if value:
             return value

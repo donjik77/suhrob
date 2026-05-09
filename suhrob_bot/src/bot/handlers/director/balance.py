@@ -139,6 +139,15 @@ async def _show_topup_instruction(
     await callback.message.edit_text(text, reply_markup=_cancel_topup_kb())
 
 
+async def _get_card_qr_file_id(sr: SettingsRepository, method: str) -> str | None:
+    return (
+        await sr.get(f"payment_{method}_qr_file_id")
+        or await sr.get(f"payment_{method}_qr_photo")
+        or await sr.get("payment_card_qr_file_id")
+        or await sr.get("payment_card_qr_photo")
+    )
+
+
 @router.callback_query(F.data == "topup_balance")
 async def start_topup(callback: CallbackQuery):
     await callback.message.edit_text(
@@ -218,10 +227,7 @@ async def select_method(callback: CallbackQuery, state: FSMContext, db_user: Use
     else:
         card = await sr.get(f"payment_{method}_card", "Karta sozlanmagan")
         holder = await sr.get(f"payment_{method}_holder", "")
-        qr_file_id = (
-            await sr.get(f"payment_{method}_qr_file_id")
-            or await sr.get(f"payment_{method}_qr_photo")
-        )
+        qr_file_id = await _get_card_qr_file_id(sr, method)
         text = _topup_instruction(
             method=method,
             amount=amount,

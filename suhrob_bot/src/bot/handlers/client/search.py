@@ -6,7 +6,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import update
 
-from src.db.models import User, UserRole, PropertyType, Company, Property
+from src.db.models import User, UserRole, PropertyType, Company, Property, ClientAlert
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
@@ -271,5 +271,56 @@ async def new_search(callback: CallbackQuery, state: FSMContext, company: Compan
 
 @router.callback_query(F.data == "search_notify")
 async def notify_on_new(callback: CallbackQuery, state: FSMContext, db_user: User):
-    # TODO: implement notification subscription in a later iteration
-    await callback.answer("Yangi uylar chiqganda xabar beramiz! ✅", show_alert=True)
+    data = await state.get_data()
+    if not data.get("company_id"):
+        await callback.answer("Avval qidiruv parametrlarini tanlang.", show_alert=True)
+        return
+
+    district = data.get("district")
+    price_max_raw = data.get("price_max")
+    rooms = data.get("rooms")
+    prop_type = data.get("property_type")
+    price_max = Decimal(price_max_raw) if price_max_raw else None
+
+    async with AsyncSessionFactory() as session:
+        from sqlalchemy import select
+
+        existing = (
+            await session.execute(
+                select(ClientAlert).where(
+                    ClientAlert.user_id == db_user.id,
+                    ClientAlert.is_active == True,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            existing.location_district = district
+            existing.price_max_usd = price_max
+            existing.rooms = rooms
+            existing.property_type = prop_type
+            existing.last_notified_at = None
+        else:
+            session.add(
+                ClientAlert(
+                    user_id=db_user.id,
+                    location_district=district,
+                    price_max_usd=price_max,
+                    rooms=rooms,
+                    property_type=prop_type,
+                    is_active=True,
+                )
+            )
+        await session.commit()
+
+    price_text = f"${int(price_max)}" if price_max else "istalgan"
+    rooms_text = f"{rooms} xona" if rooms else "istalgan"
+    await callback.message.edit_text(
+        "🔔 <b>Bildirishnoma yoqildi</b>\n\n"
+        "Yangi mos uy chiqsa, sizga xabar beramiz.\n\n"
+        f"📍 Tuman: {district or 'istalgan'}\n"
+        f"💰 Narx (max): {price_text}\n"
+        f"🚪 Xonalar: {rooms_text}\n\n"
+        "Bekor qilish uchun /unsubscribe yozing.",
+    )
+    await callback.answer("Bildirishnoma yoqildi ✅", show_alert=True)

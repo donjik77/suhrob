@@ -30,6 +30,7 @@ PAYMENT_SETTING_KEYS = (
     "payment_uzcard_card",
     "payment_uzcard_holder",
     "payment_uzcard_qr_file_id",
+    "payment_card_qr_file_id",
     "payment_crypto_address",
     "payment_crypto_network",
     "monthly_price_usd",
