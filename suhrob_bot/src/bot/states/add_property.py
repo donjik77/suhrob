@@ -29,6 +29,7 @@ class AddPropertyStates(StatesGroup):
     # Step 11: AI processing → Step 12: preview
     reviewing_preview = State()
     editing_description = State()     # inline edit of generated description
+    waiting_custom_text = State()
     # Step 13: publish options
     choosing_publish_date = State()
     choosing_publish_time = State()

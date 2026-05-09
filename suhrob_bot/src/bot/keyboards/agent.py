@@ -131,10 +131,15 @@ def features_kb(selected: list[str]) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def media_done_kb(count: int) -> InlineKeyboardMarkup:
+def media_done_kb(photo_count: int, video_count: int = 0) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    if count > 0:
-        b.button(text=f"Tayyor ({count} ta rasm)", callback_data="ap_media:done")
+    if photo_count or video_count:
+        parts = []
+        if photo_count:
+            parts.append(f"{photo_count} ta rasm")
+        if video_count:
+            parts.append(f"{video_count} ta video")
+        b.button(text=f"Tayyor ({', '.join(parts)})", callback_data="ap_media:done")
     b.adjust(1)
     return b.as_markup()
 

@@ -85,11 +85,24 @@ def _get_env_fallback(key: str) -> Optional[str]:
     return None
 
 
+def _prefers_env(key: str) -> bool:
+    upper = key.upper()
+    return upper.startswith("PAYMENT_") or upper in {
+        "MONTHLY_PRICE_USD",
+        "CURRENCY_RATE_UZS_PER_USD",
+    }
+
+
 class SettingsRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        if _prefers_env(key):
+            env_value = _get_env_fallback(key)
+            if env_value:
+                return env_value
+
         result = await self.session.execute(
             select(BotSetting.value).where(BotSetting.key == key)
         )

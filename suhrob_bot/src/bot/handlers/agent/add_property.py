@@ -19,6 +19,7 @@ from src.bot.keyboards.agent import (
     publish_date_kb, publish_time_kb, skip_kb,
 )
 from src.bot.states.add_property import AddPropertyStates
+from src.bot.utils.message_entities import dump_message_entities, load_message_entities
 from src.config import settings
 from src.db.models import (
     Company, FileType, Property, PropertyMedia, PropertyStatus, PropertyType,
@@ -110,6 +111,48 @@ def _build_preview_text(data: dict) -> str:
         f"📸 <b>Rasmlar:</b> {photos_count} ta\n\n"
         f"📝 <b>Tavsif:</b>\n{desc_preview}"
     )
+
+
+async def _answer_text_with_entities(
+    message: Message,
+    text: str,
+    entities_json: list[dict] | None,
+    reply_markup=None,
+) -> None:
+    entities = load_message_entities(entities_json)
+    try:
+        await message.answer(
+            text,
+            entities=entities,
+            parse_mode=None,
+            reply_markup=reply_markup,
+        )
+    except Exception as exc:
+        logger.warning("preview_entities_send_failed", error=str(exc))
+        await message.answer(text, parse_mode=None, reply_markup=reply_markup)
+
+
+async def _show_review_preview(message: Message, data: dict) -> None:
+    custom_text = data.get("custom_text")
+    if custom_text:
+        await _answer_text_with_entities(
+            message,
+            custom_text,
+            data.get("custom_text_entities_json"),
+            reply_markup=preview_action_kb(),
+        )
+        return
+
+    preview_text = _build_preview_text(data)
+    photos = data.get("photos", [])
+    if photos:
+        await message.answer_photo(
+            photo=photos[0]["file_id"],
+            caption=preview_text,
+            reply_markup=preview_action_kb(),
+        )
+    else:
+        await message.answer(preview_text, reply_markup=preview_action_kb())
 
 
 async def _score_and_sort_photos(bot: Bot, photos: list[dict]) -> list[dict]:
@@ -367,8 +410,9 @@ async def skip_keywords(callback: CallbackQuery, state: FSMContext):
     await state.update_data(keywords=None)
     await state.set_state(AddPropertyStates.uploading_media)
     data = await state.get_data()
-    count = len(data.get("photos", []))
-    await callback.message.edit_text(t("ap_step_media"), reply_markup=media_done_kb(count))
+    photo_count = len(data.get("photos", []))
+    video_count = len(data.get("videos", []))
+    await callback.message.edit_text(t("ap_step_media"), reply_markup=media_done_kb(photo_count, video_count))
     await callback.answer()
 
 
@@ -377,8 +421,9 @@ async def enter_keywords(message: Message, state: FSMContext):
     await state.update_data(keywords=message.text.strip())
     await state.set_state(AddPropertyStates.uploading_media)
     data = await state.get_data()
-    count = len(data.get("photos", []))
-    await message.answer(t("ap_step_media"), reply_markup=media_done_kb(count))
+    photo_count = len(data.get("photos", []))
+    video_count = len(data.get("videos", []))
+    await message.answer(t("ap_step_media"), reply_markup=media_done_kb(photo_count, video_count))
 
 
 # ─── Step 10: Upload media ─────────────────────────────────────────────────────
@@ -387,37 +432,40 @@ async def enter_keywords(message: Message, state: FSMContext):
 async def receive_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     photos: list = list(data.get("photos", []))
+    videos: list = list(data.get("videos", []))
 
     if len(photos) >= 10:
-        await message.answer(t("ap_media_limit_photo"), reply_markup=media_done_kb(len(photos)))
+        await message.answer(t("ap_media_limit_photo"), reply_markup=media_done_kb(len(photos), len(videos)))
         return
 
     photos.append({"file_id": message.photo[-1].file_id})
     await state.update_data(photos=photos)
-    await message.answer(t("ap_media_received", count=len(photos)), reply_markup=media_done_kb(len(photos)))
+    await message.answer(t("ap_media_received", count=len(photos)), reply_markup=media_done_kb(len(photos), len(videos)))
 
 
 @router.message(AddPropertyStates.uploading_media, F.video | F.document)
 async def receive_video(message: Message, state: FSMContext):
     data = await state.get_data()
+    photos: list = list(data.get("photos", []))
     videos: list = list(data.get("videos", []))
 
     if len(videos) >= 2:
-        await message.answer(t("ap_media_limit_video"))
+        await message.answer(t("ap_media_limit_video"), reply_markup=media_done_kb(len(photos), len(videos)))
         return
 
     file_id = message.video.file_id if message.video else message.document.file_id
     videos.append({"file_id": file_id})
     await state.update_data(videos=videos)
-    await message.answer(t("ap_video_received", count=len(videos)))
+    await message.answer(t("ap_video_received", count=len(videos)), reply_markup=media_done_kb(len(photos), len(videos)))
 
 
 @router.callback_query(F.data == "ap_media:done", AddPropertyStates.uploading_media)
 async def media_done(callback: CallbackQuery, state: FSMContext, bot: Bot, db_user: User):
     data = await state.get_data()
     photos: list = data.get("photos", [])
+    videos: list = data.get("videos", [])
 
-    if not photos:
+    if not photos and not videos:
         await callback.answer(t("ap_media_need_one"), show_alert=True)
         return
 
@@ -470,16 +518,7 @@ async def _run_ai_processing(message: Message, state: FSMContext, bot: Bot, db_u
     )
 
     await state.set_state(AddPropertyStates.reviewing_preview)
-    preview_text = _build_preview_text({**data, "photos": sorted_photos, "description": description})
-
-    if sorted_photos:
-        await message.answer_photo(
-            photo=sorted_photos[0]["file_id"],
-            caption=preview_text,
-            reply_markup=preview_action_kb(),
-        )
-    else:
-        await message.answer(preview_text, reply_markup=preview_action_kb())
+    await _show_review_preview(message, {**data, "photos": sorted_photos, "description": description})
 
 
 # ─── Step 12: Review preview ──────────────────────────────────────────────────
@@ -492,34 +531,40 @@ async def preview_confirm(callback: CallbackQuery, state: FSMContext, db_user: U
 
 @router.callback_query(F.data == "ap_preview:edit_text", AddPropertyStates.reviewing_preview)
 async def preview_edit_text(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AddPropertyStates.editing_description)
+    await state.set_state(AddPropertyStates.waiting_custom_text)
     data = await state.get_data()
     await callback.message.answer(
-        f"{t('ap_desc_edit_prompt')}\n\n<i>Hozirgi tavsif:</i>\n{data.get('description', '')}"
+        "Yangi tayyor e'lon matnini yuboring.\n\n"
+        "Premium emoji va formatlash saqlanadi."
     )
     await callback.answer()
 
 
-@router.message(AddPropertyStates.editing_description, F.text)
-async def save_edited_description(message: Message, state: FSMContext, db_user: User, bot: Bot):
-    await state.update_data(description=message.text.strip(), description_edited=True)
+@router.message(AddPropertyStates.waiting_custom_text, F.text)
+async def save_custom_text(message: Message, state: FSMContext, db_user: User, bot: Bot):
+    if not message.text or not message.text.strip():
+        await message.answer("Matn bo'sh bo'lmasin. Tayyor e'lon matnini yuboring:")
+        return
+
+    await state.update_data(
+        custom_text=message.text,
+        custom_text_entities_json=dump_message_entities(message.entities),
+        description_edited=True,
+    )
     await state.set_state(AddPropertyStates.reviewing_preview)
     data = await state.get_data()
-    preview_text = _build_preview_text(data)
-    photos = data.get("photos", [])
-    if photos:
-        await message.answer_photo(
-            photo=photos[0]["file_id"],
-            caption=preview_text,
-            reply_markup=preview_action_kb(),
-        )
-    else:
-        await message.answer(preview_text, reply_markup=preview_action_kb())
+    await _show_review_preview(message, data)
 
 
 @router.callback_query(F.data == "ap_preview:regen", AddPropertyStates.reviewing_preview)
 async def preview_regen(callback: CallbackQuery, state: FSMContext, bot: Bot, db_user: User):
-    await callback.message.edit_caption(caption=t("ap_processing"))
+    try:
+        if callback.message.caption is not None:
+            await callback.message.edit_caption(caption=t("ap_processing"))
+        else:
+            await callback.message.edit_text(t("ap_processing"))
+    except Exception:
+        await callback.message.answer(t("ap_processing"))
     await callback.answer()
 
     data = await state.get_data()
@@ -542,15 +587,16 @@ async def preview_regen(callback: CallbackQuery, state: FSMContext, bot: Bot, db
     }
 
     new_desc = await generate_property_description(ai_data)
-    await state.update_data(description=new_desc)
+    await state.update_data(
+        description=new_desc,
+        custom_text=None,
+        custom_text_entities_json=None,
+    )
     data["description"] = new_desc
+    data.pop("custom_text", None)
+    data.pop("custom_text_entities_json", None)
 
-    preview_text = _build_preview_text(data)
-    photos = data.get("photos", [])
-    if photos:
-        await callback.message.edit_caption(caption=preview_text, reply_markup=preview_action_kb())
-    else:
-        await callback.message.edit_text(preview_text, reply_markup=preview_action_kb())
+    await _show_review_preview(callback.message, data)
 
 
 @router.callback_query(F.data == "ap_preview:cancel", AddPropertyStates.reviewing_preview)
@@ -575,13 +621,16 @@ async def _save_and_ask_publish(message: Message, state: FSMContext, db_user: Us
         ptype = PropertyType(data.get("property_type") or "apartment")
         price = data.get("price_usd") or 0
         rooms = data.get("rooms") or 1
+        custom_text = data.get("custom_text")
 
         prop = Property(
             company_id=company_id,
             agent_id=db_user.id,
             title=data.get("title") or f"{ptype.value} — {rooms} xona",
-            description=data.get("description"),
+            description=custom_text or data.get("description"),
             description_edited=bool(data.get("description_edited")),
+            custom_text=custom_text,
+            custom_text_entities_json=data.get("custom_text_entities_json"),
             price_usd=Decimal(str(price)),
             location_district=data.get("district", ""),
             location_address=data.get("address"),

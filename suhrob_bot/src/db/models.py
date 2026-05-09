@@ -243,6 +243,8 @@ class Property(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     description_edited: Mapped[bool] = mapped_column(Boolean, default=False)
+    custom_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    custom_text_entities_json: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     location_district: Mapped[str] = mapped_column(String(100), nullable=False)
     location_address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     location_lat: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7), nullable=True)
