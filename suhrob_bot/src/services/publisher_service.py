@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import Company, FileType
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
+from src.bot.utils.property_media import MEDIA_GROUP_LIMIT
 from src.bot.utils.message_entities import load_message_entities
 from src.utils.formatters import format_channel_post
 
@@ -60,6 +61,11 @@ def _input_media_item(media, *, caption: str | None = None, entities=None, parse
     return InputMediaPhoto(**kwargs)
 
 
+def _media_chunks(media_items: list):
+    for index in range(0, len(media_items), MEDIA_GROUP_LIMIT):
+        yield media_items[index:index + MEDIA_GROUP_LIMIT]
+
+
 async def _send_single_media(bot: Bot, *, chat_id, media, caption=None, entities=None, parse_mode=None, reply_markup=None):
     caption_kwargs = {"caption": caption, "reply_markup": reply_markup}
     if entities:
@@ -79,6 +85,68 @@ async def _send_single_media(bot: Bot, *, chat_id, media, caption=None, entities
         photo=media.file_id,
         **caption_kwargs,
     )
+
+
+async def _send_media_items(
+    bot: Bot,
+    *,
+    chat_id,
+    media_items: list,
+    caption: str | None = None,
+    entities=None,
+    parse_mode=None,
+    reply_markup=None,
+    button_text: str = "Batafsil ma'lumot va savol uchun:",
+):
+    if not media_items:
+        return []
+
+    if len(media_items) == 1:
+        msg = await _send_single_media(
+            bot,
+            chat_id=chat_id,
+            media=media_items[0],
+            caption=caption,
+            entities=entities,
+            parse_mode=parse_mode,
+            reply_markup=reply_markup,
+        )
+        return [msg]
+
+    sent_messages = []
+    first_chunk = True
+    for chunk in _media_chunks(media_items):
+        if len(chunk) == 1:
+            msg = await _send_single_media(
+                bot,
+                chat_id=chat_id,
+                media=chunk[0],
+                caption=caption if first_chunk else None,
+                entities=entities if first_chunk else None,
+                parse_mode=parse_mode if first_chunk else None,
+            )
+            sent_messages.append(msg)
+        else:
+            media_group = [
+                _input_media_item(
+                    media,
+                    caption=caption if first_chunk and index == 0 else None,
+                    entities=entities if first_chunk and index == 0 else None,
+                    parse_mode=parse_mode if first_chunk and index == 0 else None,
+                )
+                for index, media in enumerate(chunk)
+            ]
+            sent_messages.extend(await bot.send_media_group(chat_id=chat_id, media=media_group))
+        first_chunk = False
+
+    if reply_markup:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=button_text,
+            reply_markup=reply_markup,
+        )
+
+    return sent_messages
 
 
 class PublisherService:
@@ -112,55 +180,27 @@ class PublisherService:
                 entities = load_message_entities(prop.custom_text_entities_json)
                 if media_items and len(custom_text) <= 1024:
                     try:
-                        if len(media_items) > 1:
-                            media_group = [
-                                _input_media_item(media_items[0], caption=custom_text, entities=entities, parse_mode=None),
-                                *[_input_media_item(m) for m in media_items[1:]],
-                            ]
-                            msgs = await self.bot.send_media_group(chat_id=channel_id, media=media_group)
-                            post_id = str(msgs[0].message_id)
-                            if reply_markup:
-                                await self.bot.send_message(
-                                    chat_id=channel_id,
-                                    text="Batafsil ma'lumot va savol uchun:",
-                                    reply_markup=reply_markup,
-                                )
-                        else:
-                            msg = await _send_single_media(
-                                self.bot,
-                                chat_id=channel_id,
-                                media=media_items[0],
-                                caption=custom_text,
-                                entities=entities,
-                                parse_mode=None,
-                                reply_markup=reply_markup,
-                            )
-                            post_id = str(msg.message_id)
+                        msgs = await _send_media_items(
+                            self.bot,
+                            chat_id=channel_id,
+                            media_items=media_items,
+                            caption=custom_text,
+                            entities=entities,
+                            parse_mode=None,
+                            reply_markup=reply_markup,
+                        )
+                        post_id = str(msgs[0].message_id)
                     except Exception as exc:
                         logger.warning("channel_media_caption_entities_failed", error=str(exc))
-                        if len(media_items) > 1:
-                            media_group = [
-                                _input_media_item(media_items[0], caption=custom_text, parse_mode=None),
-                                *[_input_media_item(m) for m in media_items[1:]],
-                            ]
-                            msgs = await self.bot.send_media_group(chat_id=channel_id, media=media_group)
-                            post_id = str(msgs[0].message_id)
-                            if reply_markup:
-                                await self.bot.send_message(
-                                    chat_id=channel_id,
-                                    text="Batafsil ma'lumot va savol uchun:",
-                                    reply_markup=reply_markup,
-                                )
-                        else:
-                            msg = await _send_single_media(
-                                self.bot,
-                                chat_id=channel_id,
-                                media=media_items[0],
-                                caption=custom_text,
-                                parse_mode=None,
-                                reply_markup=reply_markup,
-                            )
-                            post_id = str(msg.message_id)
+                        msgs = await _send_media_items(
+                            self.bot,
+                            chat_id=channel_id,
+                            media_items=media_items,
+                            caption=custom_text,
+                            parse_mode=None,
+                            reply_markup=reply_markup,
+                        )
+                        post_id = str(msgs[0].message_id)
                 else:
                     msg = await _send_message_with_entities(
                         self.bot,
@@ -170,37 +210,29 @@ class PublisherService:
                         reply_markup=reply_markup,
                     )
                     post_id = str(msg.message_id)
+                    if media_items:
+                        await _send_media_items(
+                            self.bot,
+                            chat_id=channel_id,
+                            media_items=media_items,
+                        )
 
             else:
                 settings_repo = SettingsRepository(self.session)
                 rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
                 caption = format_channel_post(prop, rate)
 
-                if len(media_items) > 1:
-                    # Send media group first (no inline_kb on media groups), then button separately
-                    media_group = [
-                        _input_media_item(media_items[0], caption=caption, parse_mode="HTML"),
-                        *[_input_media_item(m) for m in media_items[1:]],
-                    ]
-                    msgs = await self.bot.send_media_group(chat_id=channel_id, media=media_group)
-                    post_id = str(msgs[0].message_id)
-                    # Send button as separate message
-                    if reply_markup:
-                        await self.bot.send_message(
-                            chat_id=channel_id,
-                            text="👆 Batafsil ma'lumot va savol uchun:",
-                            reply_markup=reply_markup,
-                        )
-                elif len(media_items) == 1:
-                    msg = await _send_single_media(
+                if media_items:
+                    msgs = await _send_media_items(
                         self.bot,
                         chat_id=channel_id,
-                        media=media_items[0],
+                        media_items=media_items,
                         caption=caption,
                         parse_mode="HTML",
                         reply_markup=reply_markup,
+                        button_text="👆 Batafsil ma'lumot va savol uchun:",
                     )
-                    post_id = str(msg.message_id)
+                    post_id = str(msgs[0].message_id)
                 else:
                     msg = await self.bot.send_message(
                         chat_id=channel_id,

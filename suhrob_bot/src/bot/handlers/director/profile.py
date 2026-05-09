@@ -16,7 +16,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text.in_([t("btn_my_profile"), "/profile"]))
+@router.message(F.text.in_([t("btn_my_profile"), t("btn_profile"), t("btn_shared_profile"), "/profile"]))
 async def director_profile(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
     async with AsyncSessionFactory() as session:
@@ -83,4 +83,4 @@ async def director_profile(message: Message, db_user: User):
         ],
         [InlineKeyboardButton(text="✏️ Profilni tahrirlash", callback_data="edit_profile")],
     ])
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)

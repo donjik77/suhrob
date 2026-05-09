@@ -6,6 +6,7 @@ from src.db.session import AsyncSessionFactory
 from src.db.repositories.settings_repo import SettingsRepository
 from src.bot.keyboards.client import favorites_kb, main_menu_kb
 from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.bot.utils.property_media import answer_property_media_card
 from src.utils.formatters import format_property_card
 from locales.uz import t
 
@@ -61,15 +62,13 @@ async def show_favorites(message: Message, db_user: User, company: Company):
                 .values(views_count=Property.views_count + 1)
             )
             card_text = format_property_card(prop, rate)
-            kb = favorites_kb(prop.id)
-            if prop.media:
-                first_media = prop.media[0]
-                if first_media.file_type.value == "video":
-                    await message.answer_video(video=first_media.file_id, caption=card_text, reply_markup=kb)
-                else:
-                    await message.answer_photo(photo=first_media.file_id, caption=card_text, reply_markup=kb)
-            else:
-                await message.answer(card_text, reply_markup=kb)
+            await answer_property_media_card(
+                message,
+                media_items=prop.media,
+                caption=card_text,
+                reply_markup=favorites_kb(prop.id),
+                parse_mode="HTML",
+            )
         await session.commit()
 
 

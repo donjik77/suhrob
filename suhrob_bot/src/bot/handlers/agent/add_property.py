@@ -20,6 +20,7 @@ from src.bot.keyboards.agent import (
 )
 from src.bot.states.add_property import AddPropertyStates
 from src.bot.utils.message_entities import dump_message_entities, load_message_entities
+from src.bot.utils.property_media import answer_property_media_card
 from src.config import settings
 from src.db.models import (
     Company, FileType, Property, PropertyMedia, PropertyStatus, PropertyType,
@@ -97,6 +98,7 @@ def _build_preview_text(data: dict) -> str:
 
     desc_preview = str(description)[:300] + ("…" if len(str(description)) > 300 else "")
     photos_count = len(data.get("photos", []))
+    videos_count = len(data.get("videos", []))
 
     return (
         f"{t('ap_preview_header')}"
@@ -108,7 +110,8 @@ def _build_preview_text(data: dict) -> str:
         f"📐 <b>Maydon:</b> {area_str}\n"
         f"💰 <b>Narx:</b> {price_str}\n"
         f"✨ <b>Xususiyatlar:</b> {feat_labels}\n"
-        f"📸 <b>Rasmlar:</b> {photos_count} ta\n\n"
+        f"📸 <b>Rasmlar:</b> {photos_count} ta\n"
+        f"📹 <b>Video:</b> {videos_count} ta\n\n"
         f"📝 <b>Tavsif:</b>\n{desc_preview}"
     )
 
@@ -132,9 +135,26 @@ async def _answer_text_with_entities(
         await message.answer(text, parse_mode=None, reply_markup=reply_markup)
 
 
+def _preview_media_items(data: dict) -> list[dict]:
+    photos = data.get("photos", [])
+    videos = data.get("videos", [])
+    return [
+        *[{"file_id": item["file_id"], "file_type": FileType.photo} for item in photos],
+        *[{"file_id": item["file_id"], "file_type": FileType.video} for item in videos],
+    ]
+
+
 async def _show_review_preview(message: Message, data: dict) -> None:
     custom_text = data.get("custom_text")
     if custom_text:
+        media_items = _preview_media_items(data)
+        if media_items:
+            await answer_property_media_card(
+                message,
+                media_items=media_items,
+                caption="📸 Yuklangan media",
+                parse_mode="HTML",
+            )
         await _answer_text_with_entities(
             message,
             custom_text,
@@ -144,22 +164,13 @@ async def _show_review_preview(message: Message, data: dict) -> None:
         return
 
     preview_text = _build_preview_text(data)
-    photos = data.get("photos", [])
-    videos = data.get("videos", [])
-    if photos:
-        await message.answer_photo(
-            photo=photos[0]["file_id"],
-            caption=preview_text,
-            reply_markup=preview_action_kb(),
-        )
-    elif videos:
-        await message.answer_video(
-            video=videos[0]["file_id"],
-            caption=preview_text,
-            reply_markup=preview_action_kb(),
-        )
-    else:
-        await message.answer(preview_text, reply_markup=preview_action_kb())
+    await answer_property_media_card(
+        message,
+        media_items=_preview_media_items(data),
+        caption=preview_text,
+        reply_markup=preview_action_kb(),
+        parse_mode="HTML",
+    )
 
 
 async def _score_and_sort_photos(bot: Bot, photos: list[dict]) -> list[dict]:

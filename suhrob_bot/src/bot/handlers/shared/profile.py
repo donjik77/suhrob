@@ -9,10 +9,11 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from src.db.models import User, UserRole
 from src.db.session import AsyncSessionFactory
 from src.bot.filters.role import RoleFilter
+from locales.uz import t
 
 router = Router()
-router.message.filter(RoleFilter(UserRole.agent, UserRole.director))
-router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director))
+router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
+router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 
 
 class EditProfileStates(StatesGroup):
@@ -20,7 +21,7 @@ class EditProfileStates(StatesGroup):
     editing_phone = State()
 
 
-@router.message(F.text.in_(["⚙️ Mening profilim", "/profile"]))
+@router.message(F.text.in_([t("btn_shared_profile"), "/profile"]))
 async def show_profile(message: Message, db_user: User):
     company_name = db_user.company.name if db_user.company else "—"
     profile_text = (

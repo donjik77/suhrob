@@ -172,7 +172,7 @@ async def job_send_property_alerts(bot: Bot) -> None:
     from datetime import timezone, timedelta
     from sqlalchemy import select, and_
     from sqlalchemy.orm import selectinload
-    from src.db.models import ClientAlert, Property, PropertyStatus, PropertyType, User, PropertyMedia
+    from src.db.models import ClientAlert, Property, PropertyStatus, PropertyType, User
 
     async with AsyncSessionFactory() as session:
         now = datetime.now(timezone.utc)
@@ -219,6 +219,7 @@ async def job_send_property_alerts(bot: Bot) -> None:
             from src.db.repositories.settings_repo import SettingsRepository
             from src.utils.formatters import format_property_card
             from src.bot.keyboards.client import property_card_kb
+            from src.bot.utils.property_media import send_property_media_card
 
             settings_repo = SettingsRepository(session)
             rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
@@ -231,24 +232,14 @@ async def job_send_property_alerts(bot: Bot) -> None:
                 )
                 for prop in props:
                     caption = format_property_card(prop, rate)
-                    media_items = [m for m in (prop.media or []) if m.file_type.value in ("photo", "video")]
-                    kb = property_card_kb(prop.id)
-                    if media_items:
-                        from aiogram.types import InputMediaPhoto, InputMediaVideo
-                        if len(media_items) > 1:
-                            first_cls = InputMediaVideo if media_items[0].file_type.value == "video" else InputMediaPhoto
-                            media = [first_cls(media=media_items[0].file_id, caption=caption, parse_mode="HTML")]
-                            for item in media_items[1:4]:
-                                cls = InputMediaVideo if item.file_type.value == "video" else InputMediaPhoto
-                                media.append(cls(media=item.file_id))
-                            await bot.send_media_group(user.telegram_user_id, media)
-                            await bot.send_message(user.telegram_user_id, "👆", reply_markup=kb)
-                        elif media_items[0].file_type.value == "video":
-                            await bot.send_video(user.telegram_user_id, media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-                        else:
-                            await bot.send_photo(user.telegram_user_id, media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-                    else:
-                        await bot.send_message(user.telegram_user_id, caption, parse_mode="HTML", reply_markup=kb)
+                    await send_property_media_card(
+                        bot,
+                        chat_id=user.telegram_user_id,
+                        media_items=prop.media,
+                        caption=caption,
+                        reply_markup=property_card_kb(prop.id),
+                        parse_mode="HTML",
+                    )
                 sent_count += 1
             except Exception as exc:
                 logger.warning("alert_send_failed", user_id=user.id, error=str(exc))

@@ -15,6 +15,7 @@ from src.bot.keyboards.client import (
     search_type_kb, search_district_kb, search_rooms_kb,
     search_price_kb, property_card_kb, search_results_kb, no_results_kb,
 )
+from src.bot.utils.property_media import answer_property_media_card
 from src.services.search_service import SearchService
 from src.utils.formatters import format_property_card
 from src.utils.parsers import parse_price_range
@@ -195,26 +196,13 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
 
     for prop in props:
         card_text = format_property_card(prop, rate)
-        prop_kb = property_card_kb(prop.id)
-
-        if prop.media:
-            first_media = prop.media[0]
-            if first_media.file_type.value == "photo":
-                await message_or_obj.answer_photo(
-                    photo=first_media.file_id,
-                    caption=card_text,
-                    reply_markup=prop_kb,
-                )
-            elif first_media.file_type.value == "video":
-                await message_or_obj.answer_video(
-                    video=first_media.file_id,
-                    caption=card_text,
-                    reply_markup=prop_kb,
-                )
-            else:
-                await message_or_obj.answer(card_text, reply_markup=prop_kb)
-        else:
-            await message_or_obj.answer(card_text, reply_markup=prop_kb)
+        await answer_property_media_card(
+            message_or_obj,
+            media_items=prop.media,
+            caption=card_text,
+            reply_markup=property_card_kb(prop.id),
+            parse_mode="HTML",
+        )
 
     # Show navigation keyboard as separate message
     nav_msg = await message_or_obj.answer("—", reply_markup=kb)

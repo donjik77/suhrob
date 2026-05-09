@@ -19,6 +19,7 @@ from src.bot.keyboards.agent import (
 )
 from src.bot.states.edit_property import EditExistingPropertyStates
 from src.bot.filters.role import RoleFilter
+from src.bot.utils.property_media import answer_property_media_card
 from src.services.publisher_service import PublisherService
 from src.utils.formatters import format_property_card, PROPERTY_TYPE_ICONS
 from locales.uz import t
@@ -174,15 +175,13 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
             settings_repo = SettingsRepository(session)
             rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
             card = format_property_card(prop, rate)
-            kb = property_actions_kb(property_id)
-            if prop.media:
-                first_media = prop.media[0]
-                if first_media.file_type.value == "video":
-                    await callback.message.answer_video(video=first_media.file_id, caption=card, reply_markup=kb)
-                else:
-                    await callback.message.answer_photo(photo=first_media.file_id, caption=card, reply_markup=kb)
-            else:
-                await callback.message.answer(card, reply_markup=kb)
+            await answer_property_media_card(
+                callback.message,
+                media_items=prop.media,
+                caption=card,
+                reply_markup=property_actions_kb(property_id),
+                parse_mode="HTML",
+            )
 
         elif action == "status":
             await callback.message.answer(

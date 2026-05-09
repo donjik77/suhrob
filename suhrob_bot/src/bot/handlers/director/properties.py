@@ -12,6 +12,7 @@ from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
 from src.bot.filters.role import RoleFilter
+from src.bot.utils.property_media import answer_property_media_card
 from src.services.publisher_service import PublisherService
 from src.utils.formatters import format_property_card, PROPERTY_TYPE_ICONS
 from locales.uz import t
@@ -145,22 +146,13 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
         builder.button(text="⬅️ Orqaga", callback_data="all_props_page:1")
         builder.adjust(2, 1)
 
-        if prop.media:
-            first_media = prop.media[0]
-            if first_media.file_type.value == "video":
-                await callback.message.answer_video(
-                    video=first_media.file_id,
-                    caption=card,
-                    reply_markup=builder.as_markup(),
-                )
-            else:
-                await callback.message.answer_photo(
-                    photo=first_media.file_id,
-                    caption=card,
-                    reply_markup=builder.as_markup(),
-                )
-        else:
-            await callback.message.answer(card, reply_markup=builder.as_markup())
+        await answer_property_media_card(
+            callback.message,
+            media_items=prop.media,
+            caption=card,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
 
     await callback.answer()
 

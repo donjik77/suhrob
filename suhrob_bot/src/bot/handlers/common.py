@@ -7,6 +7,7 @@ from src.db.models import User, UserRole, Company
 from src.bot.keyboards.client import main_menu_kb, property_card_kb
 from src.bot.keyboards.agent import agent_menu_kb
 from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.bot.utils.property_media import answer_property_media_card
 from src.utils.formatters import format_property_card
 from locales.uz import t
 
@@ -69,24 +70,12 @@ async def _show_property_deeplink(
     rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
     caption = format_property_card(prop, rate)
 
-    media_items = [m for m in (prop.media or []) if m.file_type.value in ("photo", "video")]
-    kb = property_card_kb(property_id)
-
-    if media_items:
-        from aiogram.types import InputMediaPhoto, InputMediaVideo
-        if len(media_items) > 1:
-            first_cls = InputMediaVideo if media_items[0].file_type.value == "video" else InputMediaPhoto
-            media = [first_cls(media=media_items[0].file_id, caption=caption, parse_mode="HTML")]
-            for item in media_items[1:]:
-                cls = InputMediaVideo if item.file_type.value == "video" else InputMediaPhoto
-                media.append(cls(media=item.file_id))
-            await message.answer_media_group(media)
-            await message.answer("👆", reply_markup=kb)
-        elif media_items[0].file_type.value == "video":
-            await message.answer_video(media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-        else:
-            await message.answer_photo(media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-    else:
-        await message.answer(caption, parse_mode="HTML", reply_markup=kb)
+    await answer_property_media_card(
+        message,
+        media_items=prop.media,
+        caption=caption,
+        reply_markup=property_card_kb(property_id),
+        parse_mode="HTML",
+    )
 
     await message.answer(t("welcome", name=message.from_user.full_name or "Foydalanuvchi"), reply_markup=main_menu_kb(), parse_mode="HTML")
