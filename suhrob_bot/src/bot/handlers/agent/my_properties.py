@@ -176,7 +176,11 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
             card = format_property_card(prop, rate)
             kb = property_actions_kb(property_id)
             if prop.media:
-                await callback.message.answer_photo(photo=prop.media[0].file_id, caption=card, reply_markup=kb)
+                first_media = prop.media[0]
+                if first_media.file_type.value == "video":
+                    await callback.message.answer_video(video=first_media.file_id, caption=card, reply_markup=kb)
+                else:
+                    await callback.message.answer_photo(photo=first_media.file_id, caption=card, reply_markup=kb)
             else:
                 await callback.message.answer(card, reply_markup=kb)
 

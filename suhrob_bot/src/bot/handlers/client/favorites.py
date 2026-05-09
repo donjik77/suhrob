@@ -63,7 +63,11 @@ async def show_favorites(message: Message, db_user: User, company: Company):
             card_text = format_property_card(prop, rate)
             kb = favorites_kb(prop.id)
             if prop.media:
-                await message.answer_photo(photo=prop.media[0].file_id, caption=card_text, reply_markup=kb)
+                first_media = prop.media[0]
+                if first_media.file_type.value == "video":
+                    await message.answer_video(video=first_media.file_id, caption=card_text, reply_markup=kb)
+                else:
+                    await message.answer_photo(photo=first_media.file_id, caption=card_text, reply_markup=kb)
             else:
                 await message.answer(card_text, reply_markup=kb)
         await session.commit()

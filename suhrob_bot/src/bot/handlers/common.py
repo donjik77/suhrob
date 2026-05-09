@@ -69,18 +69,23 @@ async def _show_property_deeplink(
     rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
     caption = format_property_card(prop, rate)
 
-    photos = [m for m in (prop.media or []) if m.file_type.value == "photo"]
+    media_items = [m for m in (prop.media or []) if m.file_type.value in ("photo", "video")]
     kb = property_card_kb(property_id)
 
-    if photos:
-        from aiogram.types import InputMediaPhoto
-        if len(photos) > 1:
-            media = [InputMediaPhoto(media=photos[0].file_id, caption=caption, parse_mode="HTML"),
-                     *[InputMediaPhoto(media=p.file_id) for p in photos[1:]]]
+    if media_items:
+        from aiogram.types import InputMediaPhoto, InputMediaVideo
+        if len(media_items) > 1:
+            first_cls = InputMediaVideo if media_items[0].file_type.value == "video" else InputMediaPhoto
+            media = [first_cls(media=media_items[0].file_id, caption=caption, parse_mode="HTML")]
+            for item in media_items[1:]:
+                cls = InputMediaVideo if item.file_type.value == "video" else InputMediaPhoto
+                media.append(cls(media=item.file_id))
             await message.answer_media_group(media)
             await message.answer("👆", reply_markup=kb)
+        elif media_items[0].file_type.value == "video":
+            await message.answer_video(media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
         else:
-            await message.answer_photo(photos[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            await message.answer_photo(media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
     else:
         await message.answer(caption, parse_mode="HTML", reply_markup=kb)
 

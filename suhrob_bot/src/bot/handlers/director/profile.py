@@ -5,17 +5,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.db.models import (
-    User, UserRole, UserBalance, Subscription, SubscriptionStatus, SubscriptionType
+    Company, User, UserRole, UserBalance, Subscription, SubscriptionStatus, SubscriptionType
 )
 from src.db.session import AsyncSessionFactory
 from src.bot.filters.role import RoleFilter
 from src.bot.handlers.director.company_scope import resolve_actor_company_id
+from locales.uz import t
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "👤 Mening profilim")
+@router.message(F.text.in_([t("btn_my_profile"), "/profile"]))
 async def director_profile(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
     async with AsyncSessionFactory() as session:
@@ -44,6 +45,7 @@ async def director_profile(message: Message, db_user: User):
                 )
             )
         ).scalar_one_or_none()
+        company = await session.get(Company, company_id) if company_id else None
 
     balance_usd = float(balance_row.balance_usd) if balance_row else 0.0
     balance_uzs = float(balance_row.balance_uzs) if balance_row else 0.0
@@ -55,7 +57,7 @@ async def director_profile(message: Message, db_user: User):
 
     ig_status = "✅ Faol" if ig_sub else "Faol emas"
 
-    company_name = db_user.company.name if db_user.company else "—"
+    company_name = company.name if company else "—"
 
     text = (
         f"👤 <b>Mening profilim</b>\n\n"

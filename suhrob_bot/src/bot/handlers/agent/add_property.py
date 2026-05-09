@@ -145,9 +145,16 @@ async def _show_review_preview(message: Message, data: dict) -> None:
 
     preview_text = _build_preview_text(data)
     photos = data.get("photos", [])
+    videos = data.get("videos", [])
     if photos:
         await message.answer_photo(
             photo=photos[0]["file_id"],
+            caption=preview_text,
+            reply_markup=preview_action_kb(),
+        )
+    elif videos:
+        await message.answer_video(
+            video=videos[0]["file_id"],
             caption=preview_text,
             reply_markup=preview_action_kb(),
         )

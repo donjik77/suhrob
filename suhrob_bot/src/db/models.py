@@ -285,7 +285,7 @@ class PropertyMedia(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     property_id: Mapped[int] = mapped_column(Integer, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
-    file_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_id: Mapped[str] = mapped_column(String(500), nullable=False)
     file_type: Mapped[FileType] = mapped_column(Enum(FileType), nullable=False)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)

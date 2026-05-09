@@ -282,7 +282,9 @@ async def receive_proof(message: Message, state: FSMContext, db_user: User, db_s
     await db_session.refresh(tx)
 
     # Notify developer
-    company_name = db_user.company.name if db_user.company else "—"
+    from src.db.models import Company
+    company = await db_session.get(Company, db_user.company_id) if db_user.company_id else None
+    company_name = company.name if company else "—"
     dev_text = (
         f"💰 <b>Yangi balans to'ldirish</b>\n\n"
         f"🏢 Kompaniya: {company_name}\n"

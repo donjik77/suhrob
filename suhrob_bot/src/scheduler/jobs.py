@@ -231,19 +231,22 @@ async def job_send_property_alerts(bot: Bot) -> None:
                 )
                 for prop in props:
                     caption = format_property_card(prop, rate)
-                    photos = [m for m in (prop.media or []) if m.file_type.value == "photo"]
+                    media_items = [m for m in (prop.media or []) if m.file_type.value in ("photo", "video")]
                     kb = property_card_kb(prop.id)
-                    if photos:
-                        from aiogram.types import InputMediaPhoto
-                        if len(photos) > 1:
-                            media = [
-                                InputMediaPhoto(media=photos[0].file_id, caption=caption, parse_mode="HTML"),
-                                *[InputMediaPhoto(media=p.file_id) for p in photos[1:4]],
-                            ]
+                    if media_items:
+                        from aiogram.types import InputMediaPhoto, InputMediaVideo
+                        if len(media_items) > 1:
+                            first_cls = InputMediaVideo if media_items[0].file_type.value == "video" else InputMediaPhoto
+                            media = [first_cls(media=media_items[0].file_id, caption=caption, parse_mode="HTML")]
+                            for item in media_items[1:4]:
+                                cls = InputMediaVideo if item.file_type.value == "video" else InputMediaPhoto
+                                media.append(cls(media=item.file_id))
                             await bot.send_media_group(user.telegram_user_id, media)
                             await bot.send_message(user.telegram_user_id, "👆", reply_markup=kb)
+                        elif media_items[0].file_type.value == "video":
+                            await bot.send_video(user.telegram_user_id, media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
                         else:
-                            await bot.send_photo(user.telegram_user_id, photos[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+                            await bot.send_photo(user.telegram_user_id, media_items[0].file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
                     else:
                         await bot.send_message(user.telegram_user_id, caption, parse_mode="HTML", reply_markup=kb)
                 sent_count += 1

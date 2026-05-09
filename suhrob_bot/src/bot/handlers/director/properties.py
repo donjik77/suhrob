@@ -146,11 +146,19 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
         builder.adjust(2, 1)
 
         if prop.media:
-            await callback.message.answer_photo(
-                photo=prop.media[0].file_id,
-                caption=card,
-                reply_markup=builder.as_markup(),
-            )
+            first_media = prop.media[0]
+            if first_media.file_type.value == "video":
+                await callback.message.answer_video(
+                    video=first_media.file_id,
+                    caption=card,
+                    reply_markup=builder.as_markup(),
+                )
+            else:
+                await callback.message.answer_photo(
+                    photo=first_media.file_id,
+                    caption=card,
+                    reply_markup=builder.as_markup(),
+                )
         else:
             await callback.message.answer(card, reply_markup=builder.as_markup())
 

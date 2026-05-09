@@ -199,10 +199,15 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
 
         if prop.media:
             first_media = prop.media[0]
-            from aiogram.types import InputMediaPhoto
             if first_media.file_type.value == "photo":
                 await message_or_obj.answer_photo(
                     photo=first_media.file_id,
+                    caption=card_text,
+                    reply_markup=prop_kb,
+                )
+            elif first_media.file_type.value == "video":
+                await message_or_obj.answer_video(
+                    video=first_media.file_id,
                     caption=card_text,
                     reply_markup=prop_kb,
                 )
