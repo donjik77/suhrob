@@ -10,7 +10,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "🔵 📊 Statistika")
+@router.message(F.text == "📊 Statistika")
 async def agent_stats(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         from sqlalchemy import case, select, func

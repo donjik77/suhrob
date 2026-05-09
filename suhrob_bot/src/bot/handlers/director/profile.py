@@ -15,7 +15,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "🟠 👤 Mening profilim")
+@router.message(F.text == "👤 Mening profilim")
 async def director_profile(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
     async with AsyncSessionFactory() as session:
@@ -53,7 +53,7 @@ async def director_profile(message: Message, db_user: User):
     if base_sub and base_sub.period_end:
         base_end = f" (gacha {base_sub.period_end.strftime('%d.%m.%Y')})"
 
-    ig_status = "✅ Faol" if ig_sub else "🔴 Faol emas"
+    ig_status = "✅ Faol" if ig_sub else "Faol emas"
 
     company_name = db_user.company.name if db_user.company else "—"
 

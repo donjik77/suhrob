@@ -255,7 +255,7 @@ async def enter_reject_reason(message: Message, state: FSMContext, db_user: User
     await state.clear()
 
 
-@router.message(F.text == "🟠 💰 Hisob chiqarish")
+@router.message(F.text == "💰 Hisob chiqarish")
 async def issue_invoice(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select
@@ -366,7 +366,7 @@ async def _send_invoice(event, state: FSMContext, amount_usd: int):
         await event.answer(t("invoice_sent", company=company_name))
 
 
-@router.message(F.text == "🟢 ✅ To'lovlarni tasdiqlash")
+@router.message(F.text == "✅ To'lovlarni tasdiqlash")
 async def pending_payments(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         from sqlalchemy import select

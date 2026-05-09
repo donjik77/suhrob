@@ -12,22 +12,29 @@ sys.path.insert(0, ".")
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from src.config import settings
 from src.db.models import Company
-from src.db.repositories.settings_repo import SettingsRepository
+from src.db.repositories.settings_repo import (
+    DEFAULT_SETTINGS,
+    SettingsRepository,
+    _get_env_fallback,
+)
 from sqlalchemy import select
 
 
-PAYMENT_SETTINGS = {
-    "payment_click_card": "9869100126034816",
-    "payment_click_holder": "Suhrob HOUSE",
-    "payment_humo_card": "9869100126034816",
-    "payment_humo_holder": "Suhrob HOUSE",
-    "payment_uzcard_card": "9869100126034816",
-    "payment_uzcard_holder": "Suhrob HOUSE",
-    "payment_crypto_address": "TUr3m7sAWpiysQs5S1jQkbxcvJARqAD8Rs",
-    "payment_crypto_network": "USDT TRC-20",
-    "monthly_price_usd": "49",
-    "currency_rate_uzs_per_usd": "12600",
-}
+PAYMENT_SETTING_KEYS = (
+    "payment_click_card",
+    "payment_click_holder",
+    "payment_click_qr_file_id",
+    "payment_humo_card",
+    "payment_humo_holder",
+    "payment_humo_qr_file_id",
+    "payment_uzcard_card",
+    "payment_uzcard_holder",
+    "payment_uzcard_qr_file_id",
+    "payment_crypto_address",
+    "payment_crypto_network",
+    "monthly_price_usd",
+    "currency_rate_uzs_per_usd",
+)
 
 CHANNEL_ID = "@samuylariix"
 
@@ -39,7 +46,11 @@ async def main():
     async with SessionFactory() as session:
         # Update payment settings
         repo = SettingsRepository(session)
-        for key, value in PAYMENT_SETTINGS.items():
+        for key in PAYMENT_SETTING_KEYS:
+            value = _get_env_fallback(key) or DEFAULT_SETTINGS.get(key, "")
+            if not value:
+                print(f"⚠️  {key} env qiymati topilmadi, o'tkazib yuborildi")
+                continue
             await repo.set(key, value)
             print(f"✅ {key} = {value}")
 

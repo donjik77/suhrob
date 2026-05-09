@@ -19,7 +19,7 @@ class SettingEditStates(StatesGroup):
     entering_value = State()
 
 
-@router.message(F.text == "🔵 ⚙️ Tizim sozlamalari")
+@router.message(F.text == "⚙️ Tizim sozlamalari")
 async def system_settings(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         repo = SettingsRepository(session)

@@ -9,7 +9,7 @@ from src.db.session import AsyncSessionFactory
 router = Router()
 
 
-@router.message(F.text == "🟡 🔔 Bildirishnomalar")
+@router.message(F.text == "🔔 Bildirishnomalar")
 async def notifications_menu(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         alert = (

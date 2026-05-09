@@ -16,7 +16,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "🔵 📈 To'liq statistika")
+@router.message(F.text == "📈 To'liq statistika")
 async def full_dashboard(message: Message, db_user: User):
     cid = await resolve_actor_company_id(db_user)
     if not cid:
@@ -142,7 +142,7 @@ async def full_dashboard(message: Message, db_user: User):
     lines = [
         "📊 <b>Kompaniya dashbordi</b> (oxirgi 30 kun)\n",
         "🔻 <b>Voronka:</b>",
-        f"🔵 Yangi mijozlar: {new_leads}",
+        f"Yangi mijozlar: {new_leads}",
         f"👁 Ko'rishlar: {views_result}",
         f"💬 So'rovlar/kontaktlar: {contacts_result}",
         f"🔥 Qaynoq mijozlar: {len(hot_profiles)}",

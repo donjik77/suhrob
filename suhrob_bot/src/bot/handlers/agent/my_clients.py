@@ -57,7 +57,7 @@ async def get_lead_for_director(
 
 
 STATUS_LABELS = {
-    LeadStatus.new: "🔵 Yangi",
+    LeadStatus.new: "Yangi",
     LeadStatus.contacted: "📞 Bog'langan",
     LeadStatus.showing_scheduled: "🏠 Ko'rsatuv",
     LeadStatus.negotiation: "💼 Muzokarada",

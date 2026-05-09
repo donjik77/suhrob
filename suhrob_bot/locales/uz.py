@@ -12,12 +12,12 @@ TEXTS = {
         "welcome": "🏠 Assalomu alaykum, <b>{name}</b>!\n\nSuhrob HOUSE botiga xush kelibsiz.\nMen sizga mukammal uy topishda yordam beraman.\n\nQanday boshlamoqchisiz? 👇",
         "main_menu": "Asosiy menyu",
         # Client main menu buttons
-        "btn_search": "🔵 🔍 Uy qidirish",
-        "btn_favorites": "🟣 ⭐ Saralangan",
-        "btn_contact": "🔵 📞 Aloqa",
-        "btn_consultation": "🟢 💬 Konsultatsiya",
-        "btn_notifications": "🟡 🔔 Bildirishnomalar",
-        "btn_help": "🔵 ℹ️ Yordam",
+        "btn_search": "🔍 Uy qidirish",
+        "btn_favorites": "⭐ Saralangan",
+        "btn_contact": "📞 Aloqa",
+        "btn_consultation": "💬 Konsultatsiya",
+        "btn_notifications": "🔔 Bildirishnomalar",
+        "btn_help": "ℹ️ Yordam",
         # Search flow
         "search_type": "Qanday uy qidiryapsiz?",
         "type_apartment": "🏢 Kvartira",
@@ -60,11 +60,11 @@ TEXTS = {
         ),
         "floor_info": "🏢 Qavat: {floor}/{total_floors}\n",
         "area_info": "📐 Maydoni: {area} m²\n",
-        "btn_contact_agent": "🟢 📞 Bog'lanish",
-        "btn_save_property": "🟣 ⭐ Saqlash",
-        "btn_share": "🔵 📤 Ulashish",
-        "btn_ai_ask": "🟢 💬 Savol berish (AI)",
-        "btn_mortgage": "🟠 💰 Ipoteka kalkulyatori",
+        "btn_contact_agent": "📞 Bog'lanish",
+        "btn_save_property": "⭐ Saqlash",
+        "btn_share": "📤 Ulashish",
+        "btn_ai_ask": "💬 Savol berish (AI)",
+        "btn_mortgage": "💰 Ipoteka kalkulyatori",
         "btn_remove_favorite": "💔 O'chirish",
         # Agent contact
         "agent_contact": "📞 Agent ma'lumotlari:\n\nIsm: {name}\nTelefon: {phone}\nTelegram: {username}",
@@ -91,28 +91,28 @@ TEXTS = {
         "service_blocked_agent": "🔒 Obuna to'lovi kerak. Direktor bilan bog'laning.",
         # Agent main menu
         "agent_menu_welcome": "👋 Salom, {name}!\n\nSizning panelingiz:",
-        "btn_add_property": "🟢 ➕ Yangi uy qo'shish",
+        "btn_add_property": "➕ Yangi uy qo'shish",
 
-        "btn_my_properties": "🔵 📋 Mening uylarim",
-        "btn_scheduled_posts": "🟡 📅 Rejalashtirilgan postlar",
-        "btn_stats": "🔵 📊 Statistika",
-        "btn_settings": "🔵 ⚙️ Sozlamalar",
+        "btn_my_properties": "📋 Mening uylarim",
+        "btn_scheduled_posts": "📅 Rejalashtirilgan postlar",
+        "btn_stats": "📊 Statistika",
+        "btn_settings": "⚙️ Sozlamalar",
         "btn_my_clients": "🔥 Mening mijozlarim",
         "btn_all_clients": "🔥 Barcha mijozlar",
-        "btn_instagram": "🟣 📷 Instagram ulash",
+        "btn_instagram": "📷 Instagram ulash",
         # Director main menu additions
-        "btn_agents_management": "🔵 👥 Agentlar boshqaruvi",
-        "btn_agent_rating": "🔵 👥 Agentlar reytingi",
-        "btn_all_properties": "🔵 🏢 Barcha uylar",
-        "btn_subscription": "🟠 💳 Obuna holati",
-        "btn_full_stats": "🔵 📈 To'liq statistika",
-        "btn_my_profile": "🟠 👤 Mening profilim",
-        "btn_shared_profile": "🔵 ⚙️ Mening profilim",
+        "btn_agents_management": "👥 Agentlar boshqaruvi",
+        "btn_agent_rating": "👥 Agentlar reytingi",
+        "btn_all_properties": "🏢 Barcha uylar",
+        "btn_subscription": "💳 Obuna holati",
+        "btn_full_stats": "📈 To'liq statistika",
+        "btn_my_profile": "👤 Mening profilim",
+        "btn_shared_profile": "⚙️ Mening profilim",
         # Developer main menu additions
-        "btn_issue_invoice": "🟠 💰 Hisob chiqarish",
-        "btn_confirm_payments": "🟢 ✅ To'lovlarni tasdiqlash",
-        "btn_companies": "🔵 🏢 Kompaniyalar",
-        "btn_system_settings": "🔵 ⚙️ Tizim sozlamalari",
+        "btn_issue_invoice": "💰 Hisob chiqarish",
+        "btn_confirm_payments": "✅ To'lovlarni tasdiqlash",
+        "btn_companies": "🏢 Kompaniyalar",
+        "btn_system_settings": "⚙️ Tizim sozlamalari",
         # Agent personal settings
         "agent_settings_menu": "⚙️ Sozlamalar\n\nIsm: {name}\nTelefon: {phone}\n\nNimani o'zgartirmoqchisiz?",
         "agent_settings_name_prompt": "Yangi ismingizni kiriting (mijozlarga ko'rsatiladi):",
@@ -288,7 +288,7 @@ TEXTS = {
             "✨ <b>Qo'shimcha xususiyatlar</b>\n\n"
             "Mavjud xususiyatlarni tanlang (bir nechtasini).\n"
             "Tanlash/bekor qilish uchun tugmani bosing.\n\n"
-            "Tayyor bo'lgach 🟢 Tayyor tugmasini bosing."
+            "Tayyor bo'lgach \"Tayyor\" tugmasini bosing."
         ),
         "ap_step_keywords": (
             "💬 Qo'shimcha ma'lumot kiriting:\n"
@@ -299,7 +299,7 @@ TEXTS = {
             "📸 <b>Rasm va videolarni yuklang</b>\n\n"
             "• Kamida 1 ta rasm (maksimal 10)\n"
             "• Video ixtiyoriy (maksimal 2)\n\n"
-            "Hammasi tayyor bo'lgach 🟢 Tayyor tugmasini bosing."
+            "Hammasi tayyor bo'lgach \"Tayyor\" tugmasini bosing."
         ),
         "ap_media_received":    "📸 {count} ta rasm qabul qilindi.",
         "ap_video_received":    "📹 {count} ta video qabul qilindi.",
@@ -336,11 +336,11 @@ TEXTS = {
             "Agar uy hali kerak bo'lsa — biz tayyor.\n"
             "Yo'q bo'lsa — sizga omad tilaymiz!"
         ),
-        "btn_follow_up_yes": "🟢 ✅ Ha, ko'rsating",
-        "btn_follow_up_no": "🔴 ❌ Hozir kerak emas",
+        "btn_follow_up_yes": "✅ Ha, ko'rsating",
+        "btn_follow_up_no": "❌ Hozir kerak emas",
         "btn_follow_up_unsub": "🔕 Bunday bildirishnomalarni yopish",
-        "btn_follow_up_looking": "🟢 Hali izlayman",
-        "btn_follow_up_found": "🔴 Topdim, rahmat",
+        "btn_follow_up_looking": "Hali izlayman",
+        "btn_follow_up_found": "Topdim, rahmat",
         # Channel post format
         "channel_post": (
             "{type_icon} <b>{prop_type} | {district}</b>\n\n"

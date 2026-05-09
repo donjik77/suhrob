@@ -34,7 +34,7 @@ async def _send_payment_instruction(callback: CallbackQuery, text: str, qr_file_
     await callback.message.answer(text, reply_markup=cancel_payment_kb())
 
 
-@router.message(F.text == "🟠 💳 Obuna holati")
+@router.message(F.text == "💳 Obuna holati")
 async def subscription_status(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
     if company_id is None:

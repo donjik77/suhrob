@@ -1,5 +1,6 @@
 import re as _re
 from datetime import datetime, timedelta, timezone
+from html import escape
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -13,6 +14,7 @@ from src.db.models import User, UserRole, Property, PropertyStatus
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.user_repo import UserRepository
 from src.bot.filters.role import RoleFilter
+from src.bot.keyboards.agent import agent_menu_kb
 from src.bot.handlers.director.company_scope import resolve_actor_company_id
 from locales.uz import t
 
@@ -21,7 +23,7 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "🔵 👥 Agentlar boshqaruvi")
+@router.message(F.text == "👥 Agentlar boshqaruvi")
 async def list_agents(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
     if company_id is None:
@@ -207,8 +209,11 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
                 )
             )
             if existing.scalar_one_or_none():
-                await message.answer("❌ Bu Telegram ID kompaniyangizda allaqachon bor")
                 await state.clear()
+                await message.answer(
+                    "❌ Bu Telegram ID kompaniyangizda allaqachon bor",
+                    reply_markup=agent_menu_kb(db_user.role),
+                )
                 return
         elif username:
             existing_pending = await session.execute(
@@ -220,8 +225,11 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
                 )
             )
             if existing_pending.scalar_one_or_none():
-                await message.answer("❌ Bu username bo'yicha agent allaqachon kutilmoqda")
                 await state.clear()
+                await message.answer(
+                    "❌ Bu username bo'yicha agent allaqachon kutilmoqda",
+                    reply_markup=agent_menu_kb(db_user.role),
+                )
                 return
 
         new_agent = User(
@@ -238,10 +246,13 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
         new_agent_id = new_agent.id
 
     sent = False
+    safe_name = escape(data["full_name"])
+    safe_phone = escape(data["phone"])
+    safe_username = escape(username) if username else ""
     if telegram_user_id:
         try:
             invite_msg = (
-                f"👋 Salom, <b>{data['full_name']}</b>!\n\n"
+                f"👋 Salom, <b>{safe_name}</b>!\n\n"
                 f"Sizni kompaniyaga agent sifatida qo'shdilar.\n\n"
                 f"Botda ishlash uchun /start yuboring."
             )
@@ -252,19 +263,23 @@ async def add_agent_telegram(message: Message, state: FSMContext, db_user: User,
 
     summary = (
         f"✅ <b>Agent yaratildi!</b>\n\n"
-        f"📛 Ism: {data['full_name']}\n"
-        f"📞 Telefon: {data['phone']}\n"
+        f"📛 Ism: {safe_name}\n"
+        f"📞 Telefon: {safe_phone}\n"
         f"🆔 ID: {new_agent_id}\n"
     )
     if sent:
         summary += "\n📨 Taklifnoma yuborildi"
     elif username:
-        summary += f"\n💡 Iltiros, @{username} ga shu botning linkini yuboring"
+        summary += f"\n💡 Iltimos, @{safe_username} ga shu botning linkini yuboring"
     else:
         summary += "\n💡 Agent botga /start yuboradi va avtomatik avtorizatsiya bo'ladi"
 
-    await message.answer(summary, parse_mode='HTML')
     await state.clear()
+    await message.answer(
+        summary,
+        parse_mode='HTML',
+        reply_markup=agent_menu_kb(db_user.role),
+    )
 
 
 @router.message(F.text.contains("reytingi"))

@@ -126,7 +126,7 @@ def features_kb(selected: list[str]) -> InlineKeyboardMarkup:
     for key, label in FEATURES:
         prefix = "✅ " if key in selected else ""
         b.button(text=f"{prefix}{label}", callback_data=f"ap_feat:{key}")
-    b.button(text="🟢 Tayyor", callback_data="ap_feat:done")
+    b.button(text="Tayyor", callback_data="ap_feat:done")
     b.adjust(2, 2, 2, 2, 2, 1)
     return b.as_markup()
 
@@ -134,26 +134,26 @@ def features_kb(selected: list[str]) -> InlineKeyboardMarkup:
 def media_done_kb(count: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     if count > 0:
-        b.button(text=f"🟢 Tayyor ({count} ta rasm)", callback_data="ap_media:done")
+        b.button(text=f"Tayyor ({count} ta rasm)", callback_data="ap_media:done")
     b.adjust(1)
     return b.as_markup()
 
 
 def preview_action_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🟢 ✅ Hammasi yaxshi",      callback_data="ap_preview:confirm")
+    b.button(text="✅ Hammasi yaxshi",      callback_data="ap_preview:confirm")
     b.button(text="✏️ Matnni o'zgartirish",    callback_data="ap_preview:edit_text")
     b.button(text="🤖 AI dan boshqa variant",  callback_data="ap_preview:regen")
-    b.button(text="🔴 ❌ Bekor qilish",         callback_data="ap_preview:cancel")
+    b.button(text="❌ Bekor qilish",         callback_data="ap_preview:cancel")
     b.adjust(1)
     return b.as_markup()
 
 
 def publish_options_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🟢 📢 Hozir publikatsiya",       callback_data="ap_pub:now")
-    b.button(text="🟡 ⏰ Keyinchalik rejalashtirish", callback_data="ap_pub:schedule")
-    b.button(text="🔵 💾 Faqat bazaga saqlash",      callback_data="ap_pub:save_only")
+    b.button(text="📢 Hozir publikatsiya",       callback_data="ap_pub:now")
+    b.button(text="⏰ Keyinchalik rejalashtirish", callback_data="ap_pub:schedule")
+    b.button(text="💾 Faqat bazaga saqlash",      callback_data="ap_pub:save_only")
     b.adjust(1)
     return b.as_markup()
 

@@ -12,7 +12,7 @@ from src.utils.formatters import format_channel_post
 def _channel_inline_kb(bot_username: str, property_id: int) -> InlineKeyboardMarkup:
     url = f"https://t.me/{bot_username}?start=property_{property_id}"
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🟢 Botda ko'rish va savol berish", url=url)
+        InlineKeyboardButton(text="Botda ko'rish va savol berish", url=url)
     ]])
 
 

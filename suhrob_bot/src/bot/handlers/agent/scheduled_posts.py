@@ -13,7 +13,7 @@ router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.dev
 router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 
 
-@router.message(F.text == "🟡 📅 Rejalashtirilgan postlar")
+@router.message(F.text == "📅 Rejalashtirilgan postlar")
 async def show_scheduled_posts(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         q = (

@@ -29,7 +29,7 @@ class AddCompanyState(StatesGroup):
     bot_username = State()
 
 
-@router.message(F.text == "🔵 🏢 Kompaniyalar")
+@router.message(F.text == "🏢 Kompaniyalar")
 async def list_companies(message: Message):
     await _show_companies_list(message, edit=False)
 
@@ -53,7 +53,7 @@ async def _show_companies_list(event: Message, edit: bool = False) -> None:
     lines = [f"🏢 <b>Kompaniyalar</b> (jami: {len(companies)})\n"]
     buttons = []
     for c in companies:
-        status = "✅" if c.is_active else "🔴"
+        status = "✅" if c.is_active else ""
         lines.append(f"{status} {c.name} — @{c.bot_username or '?'}")
         buttons.append([
             InlineKeyboardButton(text=f"🔍 {c.name}", callback_data=f"company_detail:{c.id}")
@@ -133,10 +133,10 @@ async def company_detail(callback: CallbackQuery):
         f"🏠 Obyektlar: {props_count}\n\n"
         f"📋 Obuna: {sub_status}{sub_end}\n"
         f"💰 Direktor balansi: {balance_str}\n\n"
-        f"Holat: {'✅ Faol' if company.is_active else '🔴 Bloklangan'}"
+        f"Holat: {'✅ Faol' if company.is_active else 'Bloklangan'}"
     )
 
-    block_label = "✅ Faollashtirish" if not company.is_active else "🔴 Bloklash"
+    block_label = "✅ Faollashtirish" if not company.is_active else "Bloklash"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Hisob chiqarish", callback_data=f"invoice_company:{company_id}")],
         [InlineKeyboardButton(text=block_label, callback_data=f"toggle_company:{company_id}")],

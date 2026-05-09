@@ -11,7 +11,7 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director))
 
 
-@router.message(F.text == "🟣 📷 Instagram ulash")
+@router.message(F.text == "📷 Instagram ulash")
 async def instagram_menu(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         active = (
@@ -41,7 +41,7 @@ async def instagram_menu(message: Message, db_user: User):
             "✅ Avtomatik post Instagram'ga\n"
             "✅ DM'da AI-yordamchi (tez orada)\n"
             "✅ Stories avtomatik (tez orada)\n\n"
-            "Holati: 🔴 Faol emas"
+            "Holati: Faol emas"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="💳 Obuna bo'lish ($19/oy)", callback_data="instagram_subscribe"),
