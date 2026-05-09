@@ -10,6 +10,7 @@ from src.bot.keyboards.payment import payment_method_kb, cancel_payment_kb
 from src.bot.filters.role import RoleFilter
 from src.bot.handlers.director.company_scope import resolve_actor_company_id
 from src.bot.states.payment import PaymentStates
+from src.bot.utils.payment_details import get_card_payment_details, get_crypto_payment_details
 from src.bot.utils.payment_media import payment_photo_input
 from src.utils.currency import usd_to_uzs
 from locales.uz import t
@@ -122,11 +123,18 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
         if method == "crypto":
             address = await settings_repo.get("payment_crypto_address") or "—"
             network = await settings_repo.get("payment_crypto_network") or "USDT TRC-20"
+            details = await get_crypto_payment_details(settings_repo)
+            address = details.address or address
+            network = details.network or network
             text = t("payment_instructions_crypto", network=network, address=address, price_usd=int(price_usd))
         else:
             card = await settings_repo.get(f"payment_{method}_card") or "—"
             holder = await settings_repo.get(f"payment_{method}_holder") or "—"
             qr_file_id = await _get_card_qr_file_id(settings_repo, method)
+            details = await get_card_payment_details(settings_repo, method)
+            card = details.card or card
+            holder = details.holder or holder
+            qr_file_id = details.qr_file_id or qr_file_id
             text = t(
                 "payment_instructions_card",
                 method=method.upper(),

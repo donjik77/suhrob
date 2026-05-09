@@ -16,6 +16,7 @@ from src.db.models import (
 from src.bot.filters.role import RoleFilter
 from src.config import settings
 from src.db.repositories.settings_repo import SettingsRepository
+from src.bot.utils.payment_details import get_card_payment_details, get_crypto_payment_details
 from src.bot.utils.payment_media import payment_photo_input
 
 router = Router()
@@ -217,6 +218,9 @@ async def select_method(callback: CallbackQuery, state: FSMContext, db_user: Use
     if method == "crypto":
         address = await sr.get("payment_crypto_address", "Manzil sozlanmagan")
         network = await sr.get("payment_crypto_network", "USDT TRC-20")
+        details = await get_crypto_payment_details(sr)
+        address = details.address or address
+        network = details.network or network
         text = _topup_instruction(
             method=method,
             amount=amount,
@@ -228,6 +232,10 @@ async def select_method(callback: CallbackQuery, state: FSMContext, db_user: Use
         card = await sr.get(f"payment_{method}_card", "Karta sozlanmagan")
         holder = await sr.get(f"payment_{method}_holder", "")
         qr_file_id = await _get_card_qr_file_id(sr, method)
+        details = await get_card_payment_details(sr, method)
+        card = details.card or card
+        holder = details.holder or holder
+        qr_file_id = details.qr_file_id or qr_file_id
         text = _topup_instruction(
             method=method,
             amount=amount,

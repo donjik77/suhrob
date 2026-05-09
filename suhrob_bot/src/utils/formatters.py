@@ -40,6 +40,9 @@ FEATURE_LABELS: dict[str, str] = {
 
 
 def format_property_card(prop: Property, rate: float) -> str:
+    if prop.custom_text:
+        return prop.custom_text
+
     price_uzs = usd_to_uzs(prop.price_usd, rate)
     address_part = f", {prop.location_address}" if prop.location_address else ""
 
@@ -81,6 +84,9 @@ def format_property_card(prop: Property, rate: float) -> str:
 
 
 def format_channel_post(prop: Property, rate: float) -> str:
+    if prop.custom_text:
+        return prop.custom_text
+
     price_uzs = usd_to_uzs(prop.price_usd, rate)
     icon = PROPERTY_TYPE_ICONS.get(prop.property_type, "🏠")
     type_label = PROPERTY_TYPE_LABELS.get(prop.property_type, "Uy")

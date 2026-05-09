@@ -1,11 +1,16 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator
+from pathlib import Path
 from typing import Optional
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BASE_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -34,6 +39,22 @@ class Settings(BaseSettings):
     MEDIA_PATH: str = "/var/suhrob_bot/media"
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Tashkent"
+
+    # Payment settings
+    MONTHLY_PRICE_USD: int = 49
+    CURRENCY_RATE_UZS_PER_USD: int = 12600
+    PAYMENT_CLICK_CARD: str = ""
+    PAYMENT_CLICK_HOLDER: str = ""
+    PAYMENT_CLICK_QR_FILE_ID: str = ""
+    PAYMENT_HUMO_CARD: str = ""
+    PAYMENT_HUMO_HOLDER: str = ""
+    PAYMENT_HUMO_QR_FILE_ID: str = ""
+    PAYMENT_UZCARD_CARD: str = ""
+    PAYMENT_UZCARD_HOLDER: str = ""
+    PAYMENT_UZCARD_QR_FILE_ID: str = ""
+    PAYMENT_CARD_QR_FILE_ID: str = ""
+    PAYMENT_CRYPTO_ADDRESS: str = ""
+    PAYMENT_CRYPTO_NETWORK: str = "USDT TRC-20"
 
     # Premium emoji IDs (optional, used when USE_PREMIUM_EMOJI=true)
     PREMIUM_EMOJI_HOUSE: str = ""

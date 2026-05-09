@@ -627,7 +627,7 @@ async def _save_and_ask_publish(message: Message, state: FSMContext, db_user: Us
             company_id=company_id,
             agent_id=db_user.id,
             title=data.get("title") or f"{ptype.value} — {rooms} xona",
-            description=custom_text or data.get("description"),
+            description=data.get("description"),
             description_edited=bool(data.get("description_edited")),
             custom_text=custom_text,
             custom_text_entities_json=data.get("custom_text_entities_json"),
