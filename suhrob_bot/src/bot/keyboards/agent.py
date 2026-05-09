@@ -154,11 +154,12 @@ def preview_action_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def publish_options_kb() -> InlineKeyboardMarkup:
+def publish_options_kb(property_id: int | None = None) -> InlineKeyboardMarkup:
+    suffix = f":{property_id}" if property_id is not None else ""
     b = InlineKeyboardBuilder()
-    b.button(text="📢 Hozir publikatsiya",       callback_data="ap_pub:now")
-    b.button(text="⏰ Keyinchalik rejalashtirish", callback_data="ap_pub:schedule")
-    b.button(text="💾 Faqat bazaga saqlash",      callback_data="ap_pub:save_only")
+    b.button(text="📢 Hozir publikatsiya",       callback_data=f"ap_pub:now{suffix}")
+    b.button(text="⏰ Keyinchalik rejalashtirish", callback_data=f"ap_pub:schedule{suffix}")
+    b.button(text="💾 Faqat bazaga saqlash",      callback_data=f"ap_pub:save_only{suffix}")
     b.adjust(1)
     return b.as_markup()
 

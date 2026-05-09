@@ -1,0 +1,63 @@
+import os
+import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/test")
+os.environ.setdefault("DEVELOPER_TELEGRAM_ID", "1")
+
+from src.bot.keyboards.agent import publish_options_kb
+from src.db.models import SubscriptionStatus
+from src.db.repositories.subscription_repo import SubscriptionRepository
+
+
+def _now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class _Repo(SubscriptionRepository):
+    def __init__(self, sub):
+        self.sub = sub
+
+    async def get_latest(self, company_id: int):
+        return self.sub
+
+
+class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_pending_and_expired_active_subscription_are_blocked(self):
+        self.assertTrue(await _Repo(None).is_blocked(1))
+
+        pending = SimpleNamespace(status=SubscriptionStatus.pending_payment, period_end=None)
+        self.assertTrue(await _Repo(pending).is_blocked(1))
+
+        expired_active = SimpleNamespace(
+            status=SubscriptionStatus.active,
+            period_end=_now() - timedelta(seconds=1),
+        )
+        self.assertTrue(await _Repo(expired_active).is_blocked(1))
+
+    async def test_future_active_subscription_is_not_blocked(self):
+        active = SimpleNamespace(
+            status=SubscriptionStatus.active,
+            period_end=_now() + timedelta(days=1),
+        )
+        self.assertFalse(await _Repo(active).is_blocked(1))
+
+
+class PublishKeyboardTest(unittest.TestCase):
+    def test_publish_buttons_carry_property_id(self):
+        kb = publish_options_kb(42)
+
+        self.assertEqual(kb.inline_keyboard[0][0].callback_data, "ap_pub:now:42")
+        self.assertEqual(kb.inline_keyboard[1][0].callback_data, "ap_pub:schedule:42")
+        self.assertEqual(kb.inline_keyboard[2][0].callback_data, "ap_pub:save_only:42")
+
+    def test_publish_handler_does_not_depend_on_fsm_state_filter(self):
+        source = Path("src/bot/handlers/agent/add_property.py").read_text(encoding="utf-8")
+
+        self.assertIn('@router.callback_query(F.data.startswith("ap_pub:"))', source)
+
+
+if __name__ == "__main__":
+    unittest.main()

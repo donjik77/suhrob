@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
-from src.db.models import User, UserRole, SubscriptionStatus, PaymentMethod
+from src.db.models import User, UserRole, SubscriptionStatus, PaymentMethod, PaymentSource
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.subscription_repo import SubscriptionRepository
 from src.db.repositories.settings_repo import SettingsRepository
@@ -16,8 +16,8 @@ from src.utils.currency import usd_to_uzs
 from locales.uz import t
 
 router = Router()
-router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
-router.callback_query.filter(RoleFilter(UserRole.director, UserRole.developer))
+router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
+router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 
 
 CARD_PAYMENT_METHODS = {
@@ -51,7 +51,7 @@ async def _get_card_qr_file_id(settings_repo: SettingsRepository, method: str) -
     )
 
 
-@router.message(F.text == "💳 Obuna holati")
+@router.message(F.text == t("btn_subscription"))
 async def subscription_status(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
     if company_id is None:
@@ -61,9 +61,19 @@ async def subscription_status(message: Message, db_user: User):
     async with AsyncSessionFactory() as session:
         sub_repo = SubscriptionRepository(session)
         sub = await sub_repo.get_latest(company_id)
+        is_due = await sub_repo.is_blocked(company_id)
+        settings_repo = SettingsRepository(session)
+        default_price = await settings_repo.get_float("monthly_price_usd", 49.0)
+
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
 
     if not sub:
-        await message.answer("Obuna topilmadi.")
+        builder.button(text=t("btn_pay"), callback_data="pay_start")
+        await message.answer(
+            t("sub_info", status=t("sub_status_pending"), start="—", end="—", price=int(default_price)),
+            reply_markup=builder.as_markup(),
+        )
         return
 
     status_map = {
@@ -79,9 +89,7 @@ async def subscription_status(message: Message, db_user: User):
 
     text = t("sub_info", status=status_label, start=start_str, end=end_str, price=int(sub.price_usd))
 
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    builder = InlineKeyboardBuilder()
-    if sub.status in (SubscriptionStatus.expired, SubscriptionStatus.blocked, SubscriptionStatus.pending_payment):
+    if is_due:
         builder.button(text=t("btn_pay"), callback_data="pay_start")
 
     await message.answer(text, reply_markup=builder.as_markup() if builder._markup_rows else None)
@@ -121,14 +129,14 @@ async def choose_payment_method(callback: CallbackQuery, state: FSMContext, db_u
         price_uzs = usd_to_uzs(price_usd, rate)
 
         if method == "crypto":
-            address = await settings_repo.get("payment_crypto_address") or "—"
+            address = await settings_repo.get("payment_crypto_address") or "Manzil sozlanmagan"
             network = await settings_repo.get("payment_crypto_network") or "USDT TRC-20"
             details = await get_crypto_payment_details(settings_repo)
             address = details.address or address
             network = details.network or network
             text = t("payment_instructions_crypto", network=network, address=address, price_usd=int(price_usd))
         else:
-            card = await settings_repo.get(f"payment_{method}_card") or "—"
+            card = await settings_repo.get(f"payment_{method}_card") or "Karta sozlanmagan"
             holder = await settings_repo.get(f"payment_{method}_holder") or "—"
             qr_file_id = await _get_card_qr_file_id(settings_repo, method)
             details = await get_card_payment_details(settings_repo, method)
@@ -172,6 +180,7 @@ async def receive_payment_proof(message: Message, state: FSMContext, db_user: Us
 
         sub.payment_proof_file_id = file_id
         sub.payment_method = PaymentMethod(method) if method else None
+        sub.payment_source = PaymentSource.manual_proof
         sub.status = SubscriptionStatus.pending_payment
         await session.commit()
         sub_id = sub.id

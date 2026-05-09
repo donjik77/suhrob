@@ -21,7 +21,7 @@ class EditProfileStates(StatesGroup):
     editing_phone = State()
 
 
-@router.message(F.text.in_([t("btn_shared_profile"), "/profile"]))
+@router.message(F.text.in_([t("btn_my_profile"), t("btn_profile"), t("btn_shared_profile"), "/profile"]))
 async def show_profile(message: Message, db_user: User):
     company_name = db_user.company.name if db_user.company else "—"
     profile_text = (

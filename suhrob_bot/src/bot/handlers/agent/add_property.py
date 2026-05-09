@@ -690,17 +690,29 @@ async def _save_and_ask_publish(message: Message, state: FSMContext, db_user: Us
     await state.set_state(AddPropertyStates.choosing_publish_date)
     await message.answer(
         f"✅ Uy saqlandi (#{prop_id})\n\n🚀 Endi nima qilamiz?",
-        reply_markup=publish_options_kb(),
+        reply_markup=publish_options_kb(prop_id),
     )
 
 
 # ─── Step 13: Publish options ─────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("ap_pub:"), AddPropertyStates.choosing_publish_date)
+@router.callback_query(F.data.startswith("ap_pub:"))
 async def choose_publish_option(callback: CallbackQuery, state: FSMContext, db_user: User, bot: Bot):
-    action = callback.data.split(":")[1]
+    parts = callback.data.split(":")
+    action = parts[1]
     data = await state.get_data()
     prop_id = data.get("saved_prop_id")
+    if len(parts) >= 3:
+        try:
+            prop_id = int(parts[2])
+            await state.update_data(saved_prop_id=prop_id)
+        except ValueError:
+            await callback.answer("❌ Uy ID noto'g'ri", show_alert=True)
+            return
+
+    if not prop_id:
+        await callback.answer("❌ Uy topilmadi. Qaytadan urinib ko'ring.", show_alert=True)
+        return
 
     if action == "save_only":
         await state.clear()
@@ -719,6 +731,7 @@ async def choose_publish_option(callback: CallbackQuery, state: FSMContext, db_u
 
     if action == "schedule":
         await state.set_state(AddPropertyStates.choosing_publish_date)
+        await state.update_data(saved_prop_id=prop_id)
         await callback.message.edit_text(t("ap_step_pub_date"), reply_markup=publish_date_kb())
         await callback.answer()
 

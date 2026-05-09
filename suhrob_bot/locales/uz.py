@@ -89,6 +89,11 @@ TEXTS = {
         # Subscription blocked
         "service_blocked_client": "🔒 Hozircha xizmat vaqtincha to'xtatilgan. Iltimos, keyinroq urinib ko'ring.",
         "service_blocked_agent": "🔒 Obuna to'lovi kerak. Direktor bilan bog'laning.",
+        "subscription_payment_required": (
+            "🔒 <b>Bot obunasi muddati tugagan.</b>\n\n"
+            "Botdan foydalanishni davom ettirish uchun obuna to'lovini amalga oshiring. "
+            "To'lov usulini tanlang:"
+        ),
         # Agent main menu
         "agent_menu_welcome": "👋 Salom, {name}!\n\nSizning panelingiz:",
         "btn_add_property": "➕ Yangi uy qo'shish",

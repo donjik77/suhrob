@@ -1,4 +1,6 @@
 """Director profile with balance and subscription status."""
+from datetime import datetime, timezone
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
@@ -19,6 +21,7 @@ router.message.filter(RoleFilter(UserRole.director, UserRole.developer))
 @router.message(F.text.in_([t("btn_my_profile"), t("btn_profile"), t("btn_shared_profile"), "/profile"]))
 async def director_profile(message: Message, db_user: User):
     company_id = await resolve_actor_company_id(db_user)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     async with AsyncSessionFactory() as session:
         balance_row = (
             await session.execute(
@@ -32,6 +35,7 @@ async def director_profile(message: Message, db_user: User):
                     Subscription.company_id == company_id,
                     Subscription.subscription_type == SubscriptionType.base,
                     Subscription.status == SubscriptionStatus.active,
+                    Subscription.period_end >= now,
                 ).order_by(Subscription.period_end.desc())
             )
         ).scalar_one_or_none()
@@ -42,6 +46,7 @@ async def director_profile(message: Message, db_user: User):
                     Subscription.company_id == company_id,
                     Subscription.subscription_type == SubscriptionType.instagram,
                     Subscription.status == SubscriptionStatus.active,
+                    Subscription.period_end >= now,
                 )
             )
         ).scalar_one_or_none()
