@@ -144,10 +144,29 @@ def _preview_media_items(data: dict) -> list[dict]:
     ]
 
 
-async def _show_review_preview(message: Message, data: dict) -> None:
+async def _show_review_preview(message: Message, data: dict) -> dict | None:
     custom_text = data.get("custom_text")
     if custom_text:
         media_items = _preview_media_items(data)
+        entities_json = data.get("custom_text_entities_json")
+        if media_items and len(custom_text) <= 1024:
+            sent_messages = await answer_property_media_card(
+                message,
+                media_items=media_items,
+                caption=custom_text,
+                reply_markup=preview_action_kb(),
+                parse_mode=None,
+                caption_entities_json=entities_json,
+            )
+            source_message = sent_messages[0] if sent_messages else None
+            if source_message:
+                return {
+                    "custom_text_source_chat_id": source_message.chat.id,
+                    "custom_text_source_message_id": source_message.message_id,
+                    "custom_text_source_has_media": True,
+                }
+            return None
+
         if media_items:
             await answer_property_media_card(
                 message,
@@ -158,10 +177,10 @@ async def _show_review_preview(message: Message, data: dict) -> None:
         await _answer_text_with_entities(
             message,
             custom_text,
-            data.get("custom_text_entities_json"),
+            entities_json,
             reply_markup=preview_action_kb(),
         )
-        return
+        return None
 
     preview_text = _build_preview_text(data)
     await answer_property_media_card(
@@ -171,6 +190,7 @@ async def _show_review_preview(message: Message, data: dict) -> None:
         reply_markup=preview_action_kb(),
         parse_mode="HTML",
     )
+    return None
 
 
 async def _score_and_sort_photos(bot: Bot, photos: list[dict]) -> list[dict]:
@@ -564,16 +584,27 @@ async def save_custom_text(message: Message, state: FSMContext, db_user: User, b
         await message.answer("Matn bo'sh bo'lmasin. Tayyor e'lon matnini yuboring:")
         return
 
+    data = await state.get_data()
+    if _preview_media_items(data) and len(message.text) > 1024:
+        await message.answer(
+            "Media bilan bitta post bo'lishi uchun matn 1024 belgidan oshmasin. "
+            "Iltimos, matnni qisqartirib qayta yuboring."
+        )
+        return
+
     await state.update_data(
         custom_text=message.text,
         custom_text_entities_json=dump_message_entities(message.entities),
         custom_text_source_chat_id=message.chat.id,
         custom_text_source_message_id=message.message_id,
+        custom_text_source_has_media=False,
         description_edited=True,
     )
     await state.set_state(AddPropertyStates.reviewing_preview)
     data = await state.get_data()
-    await _show_review_preview(message, data)
+    preview_source = await _show_review_preview(message, data)
+    if preview_source:
+        await state.update_data(**preview_source)
 
 
 @router.callback_query(F.data == "ap_preview:regen", AddPropertyStates.reviewing_preview)
@@ -613,12 +644,14 @@ async def preview_regen(callback: CallbackQuery, state: FSMContext, bot: Bot, db
         custom_text_entities_json=None,
         custom_text_source_chat_id=None,
         custom_text_source_message_id=None,
+        custom_text_source_has_media=False,
     )
     data["description"] = new_desc
     data.pop("custom_text", None)
     data.pop("custom_text_entities_json", None)
     data.pop("custom_text_source_chat_id", None)
     data.pop("custom_text_source_message_id", None)
+    data.pop("custom_text_source_has_media", None)
 
     await _show_review_preview(callback.message, data)
 
@@ -657,6 +690,7 @@ async def _save_and_ask_publish(message: Message, state: FSMContext, db_user: Us
             custom_text_entities_json=data.get("custom_text_entities_json"),
             custom_text_source_chat_id=data.get("custom_text_source_chat_id"),
             custom_text_source_message_id=data.get("custom_text_source_message_id"),
+            custom_text_source_has_media=bool(data.get("custom_text_source_has_media")),
             price_usd=Decimal(str(price)),
             location_district=data.get("district", ""),
             location_address=data.get("address"),

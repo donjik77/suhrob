@@ -72,18 +72,18 @@ async def answer_property_media_card(
     reply_markup=None,
     parse_mode: str | None = "HTML",
     caption_entities_json: list[dict] | None = None,
-) -> None:
+) -> list[Message]:
     """Send a property card and all attached photo/video media to a chat."""
     items = property_media_items(media_items)
     caption_entities = load_message_entities(caption_entities_json)
 
     if not items:
-        await message.answer(
+        sent = await message.answer(
             caption,
             **_entity_kwargs(caption_entities, parse_mode, caption=False),
             reply_markup=reply_markup,
         )
-        return
+        return [sent]
 
     if len(items) == 1:
         media = items[0]
@@ -93,25 +93,27 @@ async def answer_property_media_card(
             "reply_markup": reply_markup,
         }
         if _is_video(media):
-            await message.answer_video(
+            sent = await message.answer_video(
                 video=_file_id(media),
                 **kwargs,
             )
         else:
-            await message.answer_photo(
+            sent = await message.answer_photo(
                 photo=_file_id(media),
                 **kwargs,
             )
-        return
+        return [sent]
 
     first_chunk = True
+    sent_messages = []
     for chunk in _media_chunks(items):
         if len(chunk) == 1:
             media = chunk[0]
             if _is_video(media):
-                await message.answer_video(video=_file_id(media))
+                sent = await message.answer_video(video=_file_id(media))
             else:
-                await message.answer_photo(photo=_file_id(media))
+                sent = await message.answer_photo(photo=_file_id(media))
+            sent_messages.append(sent)
             first_chunk = False
             continue
 
@@ -125,11 +127,12 @@ async def answer_property_media_card(
                     caption_entities=caption_entities if first_chunk and index == 0 else None,
                 )
             )
-        await message.answer_media_group(media=media_group)
+        sent_messages.extend(await message.answer_media_group(media=media_group))
         first_chunk = False
 
     if reply_markup:
         await message.answer(MEDIA_BUTTON_TEXT, reply_markup=reply_markup)
+    return sent_messages
 
 
 async def send_property_media_card(

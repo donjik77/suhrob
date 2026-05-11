@@ -200,11 +200,12 @@ class PublisherService:
                         prop=prop,
                         reply_markup=reply_markup,
                     )
-                    if media_items:
+                    remaining_media_items = media_items[1:] if prop.custom_text_source_has_media else media_items
+                    if remaining_media_items:
                         await _send_media_items(
                             self.bot,
                             chat_id=channel_id,
-                            media_items=media_items,
+                            media_items=remaining_media_items,
                         )
                 elif media_items and len(custom_text) <= 1024:
                     msgs = await _send_media_items(

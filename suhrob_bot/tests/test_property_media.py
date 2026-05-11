@@ -15,15 +15,22 @@ class FakeMessage:
 
     async def answer(self, *args, **kwargs):
         self.calls.append(("answer", args, kwargs))
+        return SimpleNamespace(chat=SimpleNamespace(id=1), message_id=len(self.calls))
 
     async def answer_photo(self, *args, **kwargs):
         self.calls.append(("photo", args, kwargs))
+        return SimpleNamespace(chat=SimpleNamespace(id=1), message_id=len(self.calls))
 
     async def answer_video(self, *args, **kwargs):
         self.calls.append(("video", args, kwargs))
+        return SimpleNamespace(chat=SimpleNamespace(id=1), message_id=len(self.calls))
 
     async def answer_media_group(self, *args, **kwargs):
         self.calls.append(("group", args, kwargs))
+        return [
+            SimpleNamespace(chat=SimpleNamespace(id=1), message_id=len(self.calls) + index)
+            for index, _media in enumerate(kwargs.get("media", []))
+        ]
 
 
 class PropertyMediaHelpersTest(unittest.IsolatedAsyncioTestCase):
