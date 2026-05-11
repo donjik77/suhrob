@@ -68,6 +68,7 @@ async def show_favorites(message: Message, db_user: User, company: Company):
                 caption=card_text,
                 reply_markup=favorites_kb(prop.id),
                 parse_mode="HTML",
+                caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
             )
         await session.commit()
 

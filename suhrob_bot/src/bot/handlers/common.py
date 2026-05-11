@@ -76,6 +76,7 @@ async def _show_property_deeplink(
         caption=caption,
         reply_markup=property_card_kb(property_id),
         parse_mode="HTML",
+        caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
     )
 
     await message.answer(t("welcome", name=message.from_user.full_name or "Foydalanuvchi"), reply_markup=main_menu_kb(), parse_mode="HTML")

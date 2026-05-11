@@ -152,6 +152,7 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
             caption=card,
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
+            caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
         )
 
     await callback.answer()

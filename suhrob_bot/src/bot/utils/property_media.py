@@ -4,6 +4,7 @@ from aiogram import Bot
 from aiogram.types import InputMediaPhoto, InputMediaVideo, Message
 
 from src.db.models import FileType
+from src.bot.utils.message_entities import load_message_entities
 
 
 MEDIA_GROUP_LIMIT = 10
@@ -32,11 +33,26 @@ def property_media_items(media_items: Iterable) -> list:
     return [media for media in (media_items or []) if _is_supported_media(media)]
 
 
-def _input_media(media, *, caption: str | None = None, parse_mode: str | None = "HTML"):
+def _entity_kwargs(entities, parse_mode: str | None, *, caption: bool) -> dict:
+    if entities:
+        return {
+            "caption_entities" if caption else "entities": entities,
+            "parse_mode": None,
+        }
+    return {"parse_mode": parse_mode}
+
+
+def _input_media(
+    media,
+    *,
+    caption: str | None = None,
+    parse_mode: str | None = "HTML",
+    caption_entities=None,
+):
     kwargs = {"media": _file_id(media)}
     if caption is not None:
         kwargs["caption"] = caption
-        kwargs["parse_mode"] = parse_mode
+        kwargs.update(_entity_kwargs(caption_entities, parse_mode, caption=True))
 
     if _is_video(media):
         return InputMediaVideo(**kwargs)
@@ -55,29 +71,36 @@ async def answer_property_media_card(
     caption: str,
     reply_markup=None,
     parse_mode: str | None = "HTML",
+    caption_entities_json: list[dict] | None = None,
 ) -> None:
     """Send a property card and all attached photo/video media to a chat."""
     items = property_media_items(media_items)
+    caption_entities = load_message_entities(caption_entities_json)
 
     if not items:
-        await message.answer(caption, parse_mode=parse_mode, reply_markup=reply_markup)
+        await message.answer(
+            caption,
+            **_entity_kwargs(caption_entities, parse_mode, caption=False),
+            reply_markup=reply_markup,
+        )
         return
 
     if len(items) == 1:
         media = items[0]
+        kwargs = {
+            "caption": caption,
+            **_entity_kwargs(caption_entities, parse_mode, caption=True),
+            "reply_markup": reply_markup,
+        }
         if _is_video(media):
             await message.answer_video(
                 video=_file_id(media),
-                caption=caption,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
+                **kwargs,
             )
         else:
             await message.answer_photo(
                 photo=_file_id(media),
-                caption=caption,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
+                **kwargs,
             )
         return
 
@@ -99,6 +122,7 @@ async def answer_property_media_card(
                     media,
                     caption=caption if first_chunk and index == 0 else None,
                     parse_mode=parse_mode,
+                    caption_entities=caption_entities if first_chunk and index == 0 else None,
                 )
             )
         await message.answer_media_group(media=media_group)
@@ -116,36 +140,39 @@ async def send_property_media_card(
     caption: str,
     reply_markup=None,
     parse_mode: str | None = "HTML",
+    caption_entities_json: list[dict] | None = None,
 ) -> None:
     """Bot-level variant used by scheduled/background sends."""
     items = property_media_items(media_items)
+    caption_entities = load_message_entities(caption_entities_json)
 
     if not items:
         await bot.send_message(
             chat_id=chat_id,
             text=caption,
-            parse_mode=parse_mode,
+            **_entity_kwargs(caption_entities, parse_mode, caption=False),
             reply_markup=reply_markup,
         )
         return
 
     if len(items) == 1:
         media = items[0]
+        kwargs = {
+            "caption": caption,
+            **_entity_kwargs(caption_entities, parse_mode, caption=True),
+            "reply_markup": reply_markup,
+        }
         if _is_video(media):
             await bot.send_video(
                 chat_id=chat_id,
                 video=_file_id(media),
-                caption=caption,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
+                **kwargs,
             )
         else:
             await bot.send_photo(
                 chat_id=chat_id,
                 photo=_file_id(media),
-                caption=caption,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
+                **kwargs,
             )
         return
 
@@ -167,6 +194,7 @@ async def send_property_media_card(
                     media,
                     caption=caption if first_chunk and index == 0 else None,
                     parse_mode=parse_mode,
+                    caption_entities=caption_entities if first_chunk and index == 0 else None,
                 )
             )
         await bot.send_media_group(chat_id=chat_id, media=media_group)

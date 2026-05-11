@@ -239,6 +239,7 @@ async def job_send_property_alerts(bot: Bot) -> None:
                         caption=caption,
                         reply_markup=property_card_kb(prop.id),
                         parse_mode="HTML",
+                        caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
                     )
                 sent_count += 1
             except Exception as exc:

@@ -181,6 +181,7 @@ async def prop_action(callback: CallbackQuery, db_user: User, bot: Bot):
                 caption=card,
                 reply_markup=property_actions_kb(property_id),
                 parse_mode="HTML",
+                caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
             )
 
         elif action == "status":

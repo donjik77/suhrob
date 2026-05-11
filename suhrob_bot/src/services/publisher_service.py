@@ -29,22 +29,13 @@ async def _send_message_with_entities(
     reply_markup=None,
 ):
     entities = load_message_entities(entities_json)
-    try:
-        return await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            entities=entities,
-            parse_mode=None,
-            reply_markup=reply_markup,
-        )
-    except Exception as exc:
-        logger.warning("channel_entities_send_failed", error=str(exc))
-        return await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode=None,
-            reply_markup=reply_markup,
-        )
+    return await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        entities=entities,
+        parse_mode=None,
+        reply_markup=reply_markup,
+    )
 
 
 def _input_media_item(media, *, caption: str | None = None, entities=None, parse_mode=None):
@@ -179,28 +170,16 @@ class PublisherService:
             if custom_text:
                 entities = load_message_entities(prop.custom_text_entities_json)
                 if media_items and len(custom_text) <= 1024:
-                    try:
-                        msgs = await _send_media_items(
-                            self.bot,
-                            chat_id=channel_id,
-                            media_items=media_items,
-                            caption=custom_text,
-                            entities=entities,
-                            parse_mode=None,
-                            reply_markup=reply_markup,
-                        )
-                        post_id = str(msgs[0].message_id)
-                    except Exception as exc:
-                        logger.warning("channel_media_caption_entities_failed", error=str(exc))
-                        msgs = await _send_media_items(
-                            self.bot,
-                            chat_id=channel_id,
-                            media_items=media_items,
-                            caption=custom_text,
-                            parse_mode=None,
-                            reply_markup=reply_markup,
-                        )
-                        post_id = str(msgs[0].message_id)
+                    msgs = await _send_media_items(
+                        self.bot,
+                        chat_id=channel_id,
+                        media_items=media_items,
+                        caption=custom_text,
+                        entities=entities,
+                        parse_mode=None,
+                        reply_markup=reply_markup,
+                    )
+                    post_id = str(msgs[0].message_id)
                 else:
                     msg = await _send_message_with_entities(
                         self.bot,

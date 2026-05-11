@@ -202,6 +202,7 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
             caption=card_text,
             reply_markup=property_card_kb(prop.id),
             parse_mode="HTML",
+            caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
         )
 
     # Show navigation keyboard as separate message

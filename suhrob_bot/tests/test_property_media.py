@@ -59,6 +59,58 @@ class PropertyMediaHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(group_media[0].caption, "card")
         self.assertEqual(message.calls[1][1][0], "👆")
 
+    async def test_answer_property_media_card_sends_text_entities_without_media(self):
+        message = FakeMessage()
+        entities = [
+            {
+                "type": "custom_emoji",
+                "offset": 0,
+                "length": 2,
+                "custom_emoji_id": "123456",
+            }
+        ]
+
+        await answer_property_media_card(
+            message,
+            media_items=[],
+            caption="🏡 Premium",
+            parse_mode="HTML",
+            caption_entities_json=entities,
+        )
+
+        self.assertEqual([call[0] for call in message.calls], ["answer"])
+        kwargs = message.calls[0][2]
+        self.assertIsNone(kwargs["parse_mode"])
+        self.assertEqual(kwargs["entities"][0].type, "custom_emoji")
+        self.assertEqual(kwargs["entities"][0].custom_emoji_id, "123456")
+
+    async def test_answer_property_media_card_sends_album_caption_entities(self):
+        message = FakeMessage()
+        items = [
+            SimpleNamespace(file_id="photo-id", file_type=FileType.photo),
+            SimpleNamespace(file_id="video-id", file_type=FileType.video),
+        ]
+        entities = [
+            {
+                "type": "custom_emoji",
+                "offset": 0,
+                "length": 2,
+                "custom_emoji_id": "123456",
+            }
+        ]
+
+        await answer_property_media_card(
+            message,
+            media_items=items,
+            caption="🏡 Premium",
+            caption_entities_json=entities,
+        )
+
+        group_media = message.calls[0][2]["media"]
+        self.assertIsNone(group_media[0].parse_mode)
+        self.assertEqual(group_media[0].caption_entities[0].type, "custom_emoji")
+        self.assertEqual(group_media[0].caption_entities[0].custom_emoji_id, "123456")
+
     async def test_answer_property_media_card_splits_over_ten_media(self):
         message = FakeMessage()
         items = [

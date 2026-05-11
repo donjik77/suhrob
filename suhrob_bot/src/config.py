@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     CURRENCY_RATE_UZS_PER_USD: int = 12600
     PAYMENT_CLICK_CARD: str = "QR CODNI SKANERLANG"
     PAYMENT_CLICK_HOLDER: str = "BAHTIYOROV DONJIK"
-    PAYMENT_CLICK_QR_FILE_ID: str = ""
+    PAYMENT_CLICK_QR_FILE_ID: str = "C:\suhrob\suhrob_bot\media\click.jpg"
     PAYMENT_HUMO_CARD: str = "9869100126034816"
     PAYMENT_HUMO_HOLDER: str = "BAHTIYOROV DONJIK"
     PAYMENT_HUMO_QR_FILE_ID: str = ""
