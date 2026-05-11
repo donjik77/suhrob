@@ -567,6 +567,8 @@ async def save_custom_text(message: Message, state: FSMContext, db_user: User, b
     await state.update_data(
         custom_text=message.text,
         custom_text_entities_json=dump_message_entities(message.entities),
+        custom_text_source_chat_id=message.chat.id,
+        custom_text_source_message_id=message.message_id,
         description_edited=True,
     )
     await state.set_state(AddPropertyStates.reviewing_preview)
@@ -609,10 +611,14 @@ async def preview_regen(callback: CallbackQuery, state: FSMContext, bot: Bot, db
         description=new_desc,
         custom_text=None,
         custom_text_entities_json=None,
+        custom_text_source_chat_id=None,
+        custom_text_source_message_id=None,
     )
     data["description"] = new_desc
     data.pop("custom_text", None)
     data.pop("custom_text_entities_json", None)
+    data.pop("custom_text_source_chat_id", None)
+    data.pop("custom_text_source_message_id", None)
 
     await _show_review_preview(callback.message, data)
 
@@ -649,6 +655,8 @@ async def _save_and_ask_publish(message: Message, state: FSMContext, db_user: Us
             description_edited=bool(data.get("description_edited")),
             custom_text=custom_text,
             custom_text_entities_json=data.get("custom_text_entities_json"),
+            custom_text_source_chat_id=data.get("custom_text_source_chat_id"),
+            custom_text_source_message_id=data.get("custom_text_source_message_id"),
             price_usd=Decimal(str(price)),
             location_district=data.get("district", ""),
             location_address=data.get("address"),

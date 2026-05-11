@@ -20,6 +20,29 @@ def _channel_inline_kb(bot_username: str, property_id: int) -> InlineKeyboardMar
     ]])
 
 
+def _has_custom_emoji_entities(entities_json: list[dict] | None) -> bool:
+    if not entities_json:
+        return False
+    for entity in entities_json:
+        raw_type = entity.get("type") if isinstance(entity, dict) else getattr(entity, "type", None)
+        if getattr(raw_type, "value", raw_type) == "custom_emoji":
+            return True
+    return False
+
+
+async def _copy_source_text_message(bot: Bot, *, chat_id, prop, reply_markup=None) -> str:
+    if not prop.custom_text_source_chat_id or not prop.custom_text_source_message_id:
+        raise ValueError("Premium emoji uchun e'lon matnini qayta yuboring va obyektni saqlang.")
+
+    copied = await bot.copy_message(
+        chat_id=chat_id,
+        from_chat_id=prop.custom_text_source_chat_id,
+        message_id=prop.custom_text_source_message_id,
+        reply_markup=reply_markup,
+    )
+    return str(copied.message_id)
+
+
 async def _send_message_with_entities(
     bot: Bot,
     *,
@@ -169,7 +192,21 @@ class PublisherService:
         try:
             if custom_text:
                 entities = load_message_entities(prop.custom_text_entities_json)
-                if media_items and len(custom_text) <= 1024:
+                has_custom_emoji = _has_custom_emoji_entities(prop.custom_text_entities_json)
+                if has_custom_emoji:
+                    post_id = await _copy_source_text_message(
+                        self.bot,
+                        chat_id=channel_id,
+                        prop=prop,
+                        reply_markup=reply_markup,
+                    )
+                    if media_items:
+                        await _send_media_items(
+                            self.bot,
+                            chat_id=channel_id,
+                            media_items=media_items,
+                        )
+                elif media_items and len(custom_text) <= 1024:
                     msgs = await _send_media_items(
                         self.bot,
                         chat_id=channel_id,
