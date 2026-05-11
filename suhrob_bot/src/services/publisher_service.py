@@ -193,7 +193,7 @@ class PublisherService:
             if custom_text:
                 entities = load_message_entities(prop.custom_text_entities_json)
                 has_custom_emoji = _has_custom_emoji_entities(prop.custom_text_entities_json)
-                if has_custom_emoji:
+                if has_custom_emoji and prop.custom_text_source_chat_id:
                     post_id = await _copy_source_text_message(
                         self.bot,
                         chat_id=channel_id,
@@ -206,6 +206,21 @@ class PublisherService:
                             self.bot,
                             chat_id=channel_id,
                             media_items=remaining_media_items,
+                        )
+                elif has_custom_emoji:
+                    msg = await _send_message_with_entities(
+                        self.bot,
+                        chat_id=channel_id,
+                        text=custom_text,
+                        entities_json=prop.custom_text_entities_json,
+                        reply_markup=reply_markup,
+                    )
+                    post_id = str(msg.message_id)
+                    if media_items:
+                        await _send_media_items(
+                            self.bot,
+                            chat_id=channel_id,
+                            media_items=media_items,
                         )
                 elif media_items and len(custom_text) <= 1024:
                     msgs = await _send_media_items(
