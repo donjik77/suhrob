@@ -54,7 +54,7 @@ TEXTS = {
             "{floor_info}"
             "{area_info}"
             "{features}"
-            "📝 <b>Tavsif:</b>\n{description}\n\n"
+            "{description}"
             "👤 <b>Agent:</b> {agent_name}\n"
             "━━━━━━━━━━━━"
         ),
@@ -126,7 +126,7 @@ TEXTS = {
         # All properties (director/developer)
         "all_props_title": "🏢 Barcha uylar (jami: {total})",
         "all_props_empty": "🏢 Hozircha uylar yo'q.",
-        # Add property — new AI flow
+        # Add property flow
         "add_prop_instruction": (
             "➕ <b>Yangi uy qo'shish</b>\n\n"
             "Uy haqida barcha ma'lumotni <b>bitta xabarda</b> yozing va rasmlarni yuboring.\n\n"
@@ -311,7 +311,7 @@ TEXTS = {
         "ap_media_limit_photo": "❌ Maksimal 10 ta rasm. Tayyor tugmasini bosing.",
         "ap_media_limit_video": "❌ Maksimal 2 ta video.",
         "ap_media_need_one":    "❌ Kamida 1 ta rasm yuboring.",
-        "ap_processing":        "🤖 AI ma'lumotlarni qayta ishlayapti...\nBir daqiqa kuting.",
+        "ap_processing":        "⏳ Ma'lumotlar tayyorlanmoqda...\nBir daqiqa kuting.",
         "ap_preview_header":    "📋 <b>Tekshirib ko'ring:</b>\n\n",
         "ap_desc_edit_prompt":  "✏️ Yangi tavsifni kiriting:",
         "ap_step_pub_date":     "📅 Qaysi kuni e'lon qilinsin?",
@@ -353,7 +353,7 @@ TEXTS = {
             "🚪 {rooms} xona  •  {floor_info}  •  📐 {area} m²\n"
             "{address_line}"
             "\n{features_line}"
-            "{description}\n\n"
+            "{description}"
             "📞 <b>Aloqa:</b> {agent_phone}\n"
             "👤 Agent: {agent_username}\n\n"
             "{hashtags}"

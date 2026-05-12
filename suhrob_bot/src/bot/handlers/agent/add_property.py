@@ -1,4 +1,4 @@
-"""Agent — add new property (step-by-step FSM with AI description generation)."""
+"""Agent — add new property (step-by-step FSM without AI text generation)."""
 import asyncio
 import io
 from datetime import date, datetime, timedelta
@@ -29,7 +29,6 @@ from src.db.models import (
 from src.db.repositories.settings_repo import SettingsRepository
 from src.db.session import AsyncSessionFactory
 from src.services.ai_service import (
-    generate_property_description,
     generate_property_title,
     evaluate_photo_quality_from_bytes,
 )
@@ -86,7 +85,7 @@ def _build_preview_text(data: dict) -> str:
     area = data.get("area_sqm")
     price = data.get("price_usd")
     features: list = data.get("features", [])
-    description = data.get("description") or "—"
+    description = data.get("description") or ""
 
     floor_str = f"{floor}/{total_floors}" if floor and total_floors else (str(floor) if floor else "—")
     area_str = f"{area} m²" if area else "—"
@@ -96,7 +95,10 @@ def _build_preview_text(data: dict) -> str:
     feat_map = dict(FEATURES)
     feat_labels = ", ".join(feat_map.get(f, f) for f in features) if features else "—"
 
-    desc_preview = str(description)[:300] + ("…" if len(str(description)) > 300 else "")
+    desc_block = ""
+    if description:
+        desc_preview = str(description)[:300] + ("…" if len(str(description)) > 300 else "")
+        desc_block = f"\n\n📝 <b>Tavsif:</b>\n{desc_preview}"
     photos_count = len(data.get("photos", []))
     videos_count = len(data.get("videos", []))
 
@@ -111,8 +113,8 @@ def _build_preview_text(data: dict) -> str:
         f"💰 <b>Narx:</b> {price_str}\n"
         f"✨ <b>Xususiyatlar:</b> {feat_labels}\n"
         f"📸 <b>Rasmlar:</b> {photos_count} ta\n"
-        f"📹 <b>Video:</b> {videos_count} ta\n\n"
-        f"📝 <b>Tavsif:</b>\n{desc_preview}"
+        f"📹 <b>Video:</b> {videos_count} ta"
+        f"{desc_block}"
     )
 
 
@@ -510,11 +512,11 @@ async def media_done(callback: CallbackQuery, state: FSMContext, bot: Bot, db_us
     await callback.message.edit_text(t("ap_processing"))
     await callback.answer()
 
-    await _run_ai_processing(callback.message, state, bot, db_user, data)
+    await _run_property_processing(callback.message, state, bot, db_user, data)
 
 
-async def _run_ai_processing(message: Message, state: FSMContext, bot: Bot, db_user: User, data: dict):
-    """Score photos, generate title + description, show preview."""
+async def _run_property_processing(message: Message, state: FSMContext, bot: Bot, db_user: User, data: dict):
+    """Score photos, generate a simple title, and show preview without AI text."""
     photos: list = data.get("photos", [])
 
     # Score photos concurrently (with timeout fallback)
@@ -527,49 +529,26 @@ async def _run_ai_processing(message: Message, state: FSMContext, bot: Bot, db_u
         sorted_photos = photos  # skip scoring if too slow
         logger.warning("photo_scoring_timeout")
 
-    # Build AI input
-    from src.bot.keyboards.agent import FEATURES
-    feat_map = dict(FEATURES)
-    feat_labels = [feat_map.get(f, f) for f in data.get("features", [])]
-
-    ai_data = {
+    title_data = {
         "property_type": data.get("property_type"),
         "district": data.get("district"),
-        "address": data.get("address"),
         "rooms": data.get("rooms"),
-        "floor": data.get("floor"),
-        "total_floors": data.get("total_floors"),
-        "area": data.get("area_sqm"),
-        "price": data.get("price_usd"),
-        "features": feat_labels,
-        "keywords": data.get("keywords"),
     }
 
-    title = generate_property_title(ai_data)
+    title = generate_property_title(title_data)
+    description = ""
 
     await state.update_data(
         photos=sorted_photos,
+        description=description,
         title=title,
     )
 
-    await state.set_state(AddPropertyStates.entering_description)
-    await message.answer(
-        "✏️ <b>Tavsif kiriting:</b>\n\n"
-        "Obyekt haqida qisqacha tavsif yozing (2-5 gap).\n"
-        "Xususiyatlar, joylashuv, afzalliklar haqida yozing.",
-        parse_mode="HTML",
-    )
+    await state.set_state(AddPropertyStates.reviewing_preview)
+    await _show_review_preview(message, {**data, "photos": sorted_photos, "description": description})
 
 
 # ─── Step 12: Review preview ──────────────────────────────────────────────────
-
-@router.message(AddPropertyStates.entering_description, F.text)
-async def description_entered(message: Message, state: FSMContext):
-    description = message.text.strip()
-    data = await state.get_data()
-    await state.update_data(description=description, ai_description=description)
-    await state.set_state(AddPropertyStates.reviewing_preview)
-    await _show_review_preview(message, {**data, "description": description})
 
 
 @router.callback_query(F.data == "ap_preview:confirm", AddPropertyStates.reviewing_preview)
@@ -616,55 +595,6 @@ async def save_custom_text(message: Message, state: FSMContext, db_user: User, b
     preview_source = await _show_review_preview(message, data)
     if preview_source:
         await state.update_data(**preview_source)
-
-
-@router.callback_query(F.data == "ap_preview:regen", AddPropertyStates.reviewing_preview)
-async def preview_regen(callback: CallbackQuery, state: FSMContext, bot: Bot, db_user: User):
-    try:
-        if callback.message.caption is not None:
-            await callback.message.edit_caption(caption=t("ap_processing"))
-        else:
-            await callback.message.edit_text(t("ap_processing"))
-    except Exception:
-        await callback.message.answer(t("ap_processing"))
-    await callback.answer()
-
-    data = await state.get_data()
-    from src.bot.keyboards.agent import FEATURES
-    feat_map = dict(FEATURES)
-    feat_labels = [feat_map.get(f, f) for f in data.get("features", [])]
-
-    ai_data = {
-        "property_type": data.get("property_type"),
-        "district": data.get("district"),
-        "address": data.get("address"),
-        "rooms": data.get("rooms"),
-        "floor": data.get("floor"),
-        "total_floors": data.get("total_floors"),
-        "area": data.get("area_sqm"),
-        "price": data.get("price_usd"),
-        "features": feat_labels,
-        "keywords": data.get("keywords"),
-        "style": "alternative",  # hint for AI to vary the style
-    }
-
-    new_desc = await generate_property_description(ai_data)
-    await state.update_data(
-        description=new_desc,
-        custom_text=None,
-        custom_text_entities_json=None,
-        custom_text_source_chat_id=None,
-        custom_text_source_message_id=None,
-        custom_text_source_has_media=False,
-    )
-    data["description"] = new_desc
-    data.pop("custom_text", None)
-    data.pop("custom_text_entities_json", None)
-    data.pop("custom_text_source_chat_id", None)
-    data.pop("custom_text_source_message_id", None)
-    data.pop("custom_text_source_has_media", None)
-
-    await _show_review_preview(callback.message, data)
 
 
 @router.callback_query(F.data == "ap_preview:cancel", AddPropertyStates.reviewing_preview)

@@ -65,7 +65,7 @@ def format_property_card(prop: Property, rate: float) -> str:
         lines = "\n".join(f"• {FEATURE_LABELS.get(f, f)}" for f in prop.features)
         features_block = f"\n✨ <b>Xususiyatlari:</b>\n{lines}\n"
 
-    desc = prop.description or ""
+    desc = f"📝 <b>Tavsif:</b>\n{prop.description}\n\n" if prop.description else ""
 
     return t(
         "property_card",
@@ -109,7 +109,7 @@ def format_channel_post(prop: Property, rate: float) -> str:
     if prop.features:
         features_line = "✨ " + "  •  ".join(FEATURE_LABELS.get(f, f) for f in prop.features) + "\n\n"
 
-    desc = (prop.description or "")[:500]
+    desc = f"{prop.description[:500]}\n\n" if prop.description else ""
 
     district_tag = "#" + prop.location_district.replace(" ", "_").replace("'", "").replace("'", "")
     rooms_tag = f"#{prop.rooms}xonali"

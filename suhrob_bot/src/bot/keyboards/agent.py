@@ -149,7 +149,6 @@ def preview_action_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Hammasi yaxshi",      callback_data="ap_preview:confirm", style=BTN_SUCCESS)
     b.button(text="✏️ Matnni o'zgartirish",    callback_data="ap_preview:edit_text", style=BTN_PRIMARY)
-    b.button(text="🤖 AI dan boshqa variant",  callback_data="ap_preview:regen", style=BTN_PRIMARY)
     b.button(text="❌ Bekor qilish",         callback_data="ap_preview:cancel", style=BTN_DANGER)
     b.adjust(1)
     return b.as_markup()
