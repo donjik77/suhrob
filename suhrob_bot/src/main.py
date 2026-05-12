@@ -21,6 +21,7 @@ from src.bot.handlers.client.search import router as search_router
 from src.bot.handlers.client.favorites import router as favorites_router
 from src.bot.handlers.client.start import router as client_start_router
 from src.bot.handlers.client.ai_consultation import router as ai_consult_router
+from src.bot.handlers.client.channel_join import router as channel_join_router
 from src.bot.handlers.client.alerts import router as alerts_router
 from src.bot.handlers.client.mortgage import router as mortgage_router
 from src.bot.handlers.agent.add_property import router as add_property_router
@@ -97,6 +98,7 @@ def register_routers(dp: Dispatcher) -> None:
     dp.include_router(favorites_router)
     dp.include_router(client_start_router)
     dp.include_router(ai_consult_router)
+    dp.include_router(channel_join_router)
     dp.include_router(alerts_router)
     dp.include_router(mortgage_router)
     dp.include_router(director_profile_router)

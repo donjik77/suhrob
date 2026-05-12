@@ -54,6 +54,20 @@ async def agent_stats(message: Message, db_user: User):
             )
         ) or 0
 
+        company_clients_total = await session.scalar(
+            select(func.count(User.id)).where(
+                User.company_id == db_user.company_id,
+                User.role == UserRole.client,
+            )
+        ) or 0
+        company_clients_today = await session.scalar(
+            select(func.count(User.id)).where(
+                User.company_id == db_user.company_id,
+                User.role == UserRole.client,
+                User.created_at >= today_start,
+            )
+        ) or 0
+
         # Top search districts
         top_searches_result = await session.execute(
             select(
@@ -78,7 +92,11 @@ async def agent_stats(message: Message, db_user: User):
         t("stats_views", count=int(views_count or 0)),
         t("stats_inquiries", count=int(leads_count or 0)),
         t("stats_contacts", count=int(contacts_count or 0)),
-        f"🟢 Bugun yangi mijozlar: <b>{new_leads_today}</b>",
+        f"🟢 Bugun yangi lидlar (sizga): <b>{new_leads_today}</b>",
+        "",
+        "👥 <b>Kompaniya mijozlari:</b>",
+        f"   Jami: <b>{company_clients_total}</b>",
+        f"   Bugun yangi: <b>{company_clients_today}</b>",
     ]
 
     if top_searches:

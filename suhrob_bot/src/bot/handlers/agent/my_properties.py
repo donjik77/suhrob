@@ -20,6 +20,7 @@ from src.bot.keyboards.agent import (
 from src.bot.states.edit_property import EditExistingPropertyStates
 from src.bot.filters.role import RoleFilter
 from src.bot.utils.property_media import answer_property_media_card
+from src.services.deletion_service import delete_property_with_dependencies
 from src.services.publisher_service import PublisherService
 from src.utils.formatters import format_property_card, PROPERTY_TYPE_ICONS
 from locales.uz import t
@@ -334,8 +335,7 @@ async def confirm_delete(callback: CallbackQuery, db_user: User):
         if not prop:
             await callback.answer("❌ Bunday obyekt topilmadi yoki sizniki emas", show_alert=True)
             return
-        await session.delete(prop)
-        await session.commit()
+        await delete_property_with_dependencies(session, property_id)
 
     await callback.answer(t("prop_deleted"), show_alert=True)
     await callback.message.delete()
