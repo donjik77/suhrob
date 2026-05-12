@@ -25,10 +25,11 @@ async def on_channel_join(event: ChatMemberUpdated, company: Company | None = No
         )
     ]])
 
+    default_name = "Do'st"
     try:
         await event.bot.send_message(
             user.id,
-            f"👋 Salom, <b>{user.full_name or 'Do\\'st'}</b>!\n\n"
+            f"👋 Salom, <b>{user.full_name or default_name}</b>!\n\n"
             f"<b>Samarqand Uylari</b> kanaliga xush kelibsiz! 🏠\n\n"
             f"Botimizda siz:\n"
             f"• Ko'chmas mulk qidira olasiz\n"
