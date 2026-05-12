@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from locales.uz import t
+from src.bot.keyboards.styles import BTN_SUCCESS, BTN_PRIMARY, BTN_DANGER
 
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
@@ -66,14 +67,36 @@ def search_price_kb() -> InlineKeyboardMarkup:
 
 def property_card_kb(property_id: int, is_favorite: bool = False) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=t("btn_contact_agent"), callback_data=f"prop_contact:{property_id}")
+    builder.add(InlineKeyboardButton(
+        text=t("btn_contact_agent"),
+        callback_data=f"prop_contact:{property_id}",
+        style=BTN_SUCCESS,
+    ))
     if is_favorite:
-        builder.button(text=t("btn_remove_favorite"), callback_data=f"prop_unfav:{property_id}")
+        builder.add(InlineKeyboardButton(
+            text=t("btn_remove_favorite"),
+            callback_data=f"prop_unfav:{property_id}",
+            style=BTN_DANGER,
+        ))
     else:
-        builder.button(text=t("btn_save_property"), callback_data=f"prop_fav:{property_id}")
-    builder.button(text=t("btn_ai_ask"), callback_data=f"ai_consult:{property_id}")
-    builder.button(text=t("btn_mortgage"), callback_data=f"mortgage:{property_id}")
-    builder.button(text=t("btn_share"), switch_inline_query=f"property_{property_id}")
+        builder.add(InlineKeyboardButton(
+            text=t("btn_save_property"),
+            callback_data=f"prop_fav:{property_id}",
+            style=BTN_PRIMARY,
+        ))
+    builder.add(InlineKeyboardButton(
+        text=t("btn_ai_ask"),
+        callback_data=f"ai_consult:{property_id}",
+        style=BTN_PRIMARY,
+    ))
+    builder.add(InlineKeyboardButton(
+        text=t("btn_mortgage"),
+        callback_data=f"mortgage:{property_id}",
+    ))
+    builder.add(InlineKeyboardButton(
+        text=t("btn_share"),
+        switch_inline_query=f"property_{property_id}",
+    ))
     builder.adjust(2, 2, 1)
     return builder.as_markup()
 
@@ -96,7 +119,15 @@ def no_results_kb() -> InlineKeyboardMarkup:
 
 def favorites_kb(property_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=t("btn_remove_favorite"), callback_data=f"prop_unfav:{property_id}")
-    builder.button(text=t("btn_contact_agent"), callback_data=f"prop_contact:{property_id}")
+    builder.add(InlineKeyboardButton(
+        text=t("btn_remove_favorite"),
+        callback_data=f"prop_unfav:{property_id}",
+        style=BTN_DANGER,
+    ))
+    builder.add(InlineKeyboardButton(
+        text=t("btn_contact_agent"),
+        callback_data=f"prop_contact:{property_id}",
+        style=BTN_SUCCESS,
+    ))
     builder.adjust(2)
     return builder.as_markup()

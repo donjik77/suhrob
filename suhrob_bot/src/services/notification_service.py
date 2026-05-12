@@ -232,3 +232,55 @@ class NotificationService:
         )
         self.session.add(log)
         await self.session.commit()
+
+
+async def notify_new_user(new_user: User, company: Company, bot, session) -> None:
+    """Уведомляет разработчика, директора и всех агентов о новом клиенте."""
+    from src.config import settings as cfg
+
+    company_name = company.name if company else "—"
+    username = getattr(new_user, "username", None)
+    username_text = f"@{username}" if username else "—"
+
+    text = (
+        f"🔔 <b>Yangi mijoz!</b>\n\n"
+        f"👤 Ism: {new_user.full_name or '—'}\n"
+        f"💬 Username: {username_text}\n"
+        f"🆔 Telegram ID: <code>{new_user.telegram_user_id}</code>\n"
+        f"🏢 Kompaniya: {company_name}"
+    )
+
+    staff: list[User] = []
+    if company:
+        result = await session.execute(
+            select(User).where(
+                User.company_id == company.id,
+                User.role.in_([UserRole.director, UserRole.agent]),
+                User.is_blocked == False,
+                User.telegram_user_id != 0,
+            )
+        )
+        staff = list(result.scalars())
+
+    recipients: list[int] = []
+    developer_id = getattr(cfg, "DEVELOPER_TELEGRAM_ID", None)
+    if developer_id:
+        recipients.append(developer_id)
+    recipients.extend(m.telegram_user_id for m in staff if m.telegram_user_id)
+    recipients = list(dict.fromkeys(recipients))
+
+    for chat_id in recipients:
+        try:
+            await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+        except Exception as exc:
+            logger.warning("notify_new_user_send_failed", chat_id=chat_id, error=str(exc))
+
+    try:
+        log = NotificationLog(
+            user_id=new_user.id,
+            notification_type=NotificationType.new_client,
+            related_subscription_id=None,
+        )
+        session.add(log)
+    except Exception as exc:
+        logger.warning("notify_new_user_log_failed", user_id=new_user.id, error=str(exc))

@@ -123,6 +123,7 @@ class NotificationType(str, enum.Enum):
     follow_up_14d = "follow_up_14d"
     new_property_alert = "new_property_alert"
     hot_lead = "hot_lead"
+    new_client = "new_client"
 
 
 class Company(Base):

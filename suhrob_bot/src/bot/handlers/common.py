@@ -1,5 +1,6 @@
 from aiogram import Router
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +16,7 @@ router = Router()
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, db_user: User, command: CommandObject, db_session: AsyncSession, company: Company):
+async def cmd_start(message: Message, db_user: User, command: CommandObject, db_session: AsyncSession, company: Company, state: FSMContext):
     name = message.from_user.full_name or message.from_user.username or "Foydalanuvchi"
 
     # Handle deep-link: /start property_123
@@ -23,7 +24,7 @@ async def cmd_start(message: Message, db_user: User, command: CommandObject, db_
     if arg.startswith("property_") and db_user.role == UserRole.client:
         try:
             property_id = int(arg.split("_", 1)[1])
-            await _show_property_deeplink(message, db_session, property_id, db_user, company)
+            await _show_property_deeplink(message, db_session, property_id, db_user, company, state)
             return
         except (ValueError, IndexError):
             pass
@@ -48,6 +49,7 @@ async def _show_property_deeplink(
     property_id: int,
     db_user: User,
     company: Company | None,
+    state: FSMContext | None = None,
 ) -> None:
     from src.db.repositories.settings_repo import SettingsRepository
 
@@ -78,5 +80,13 @@ async def _show_property_deeplink(
         parse_mode="HTML",
         caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
     )
+
+    if state:
+        from src.bot.handlers.client.ai_consultation import ConsultState
+        await state.set_state(ConsultState.chatting)
+        await state.update_data(property_id=property_id)
+        await message.answer(
+            "💬 Shu uy haqida savollaringizni yozing, men yordam beraman.\n\n❌ Chiqish uchun /stop yozing.",
+        )
 
     await message.answer(t("welcome", name=message.from_user.full_name or "Foydalanuvchi"), reply_markup=main_menu_kb(), parse_mode="HTML")

@@ -46,6 +46,14 @@ async def agent_stats(message: Message, db_user: User):
             )
         )
 
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        new_leads_today = await session.scalar(
+            select(func.count()).where(
+                LeadAssignment.agent_user_id == db_user.id,
+                LeadAssignment.created_at >= today_start,
+            )
+        ) or 0
+
         # Top search districts
         top_searches_result = await session.execute(
             select(
@@ -70,6 +78,7 @@ async def agent_stats(message: Message, db_user: User):
         t("stats_views", count=int(views_count or 0)),
         t("stats_inquiries", count=int(leads_count or 0)),
         t("stats_contacts", count=int(contacts_count or 0)),
+        f"🟢 Bugun yangi mijozlar: <b>{new_leads_today}</b>",
     ]
 
     if top_searches:
@@ -80,4 +89,4 @@ async def agent_stats(message: Message, db_user: User):
             rooms_str = f"{row.rooms} xona" if row.rooms else "har xil"
             lines.append(f"{i}. {district}, {rooms_str}")
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="HTML")

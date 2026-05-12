@@ -137,6 +137,35 @@ async def full_dashboard(message: Message, db_user: User):
             )
         ).scalar_one()
 
+        # Client stats
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        clients_total = (
+            await session.execute(
+                select(func.count(User.id)).where(
+                    User.company_id == cid,
+                    User.role == UserRole.client,
+                )
+            )
+        ).scalar_one() or 0
+        clients_today = (
+            await session.execute(
+                select(func.count(User.id)).where(
+                    User.company_id == cid,
+                    User.role == UserRole.client,
+                    User.created_at >= today_start,
+                )
+            )
+        ).scalar_one() or 0
+        clients_period = (
+            await session.execute(
+                select(func.count(User.id)).where(
+                    User.company_id == cid,
+                    User.role == UserRole.client,
+                    User.created_at >= since,
+                )
+            )
+        ).scalar_one() or 0
+
     conversion = f"{(won / max(new_leads, 1)) * 100:.1f}%" if new_leads else "0%"
 
     lines = [
@@ -155,6 +184,11 @@ async def full_dashboard(message: Message, db_user: User):
         "\n──────────────",
         f"🏠 Faol uylar: {total_active}",
         f"✅ Sotilgan (30 kun): {total_sold}",
+        "\n──────────────",
+        f"👥 <b>Mijozlar:</b>",
+        f"   Jami: <b>{clients_total}</b>",
+        f"   Bugun yangi: <b>{clients_today}</b>",
+        f"   30 kunda yangi: <b>{clients_period}</b>",
         "\n──────────────",
         "👥 <b>Agentlar reytingi:</b>",
     ]
@@ -182,7 +216,7 @@ async def full_dashboard(message: Message, db_user: User):
             if False else 0  # skip second session; shown as 0 for brevity
         )
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def _count_leads(session, company_id: int, status: LeadStatus, since=None) -> int:

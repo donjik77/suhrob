@@ -13,6 +13,7 @@ from src.db.models import User, UserRole, Company, ClientProfile, ClientConversa
 from src.db.session import AsyncSessionFactory
 from src.bot.handlers.client.property_access import get_active_property_for_client
 from src.config import settings
+from src.services import ai_service
 from locales.uz import t
 
 router = Router()
@@ -122,9 +123,7 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
         ))
         await session.commit()
 
-        # Build context
-        company_name = db_user.company.name if db_user.company else "Suhrob HOUSE"
-
+        # Build client profile for AI context
         profile_row = (
             await session.execute(
                 select(ClientProfile).where(ClientProfile.user_id == db_user.id)
@@ -133,25 +132,26 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
         client_profile = {}
         if profile_row:
             client_profile = {
-                "budget": f"${profile_row.budget_min_usd}-${profile_row.budget_max_usd}",
-                "district": profile_row.preferred_districts,
-                "rooms": profile_row.preferred_rooms,
-                "timeline": profile_row.purchase_timeline,
-                "payment": profile_row.payment_method,
-                "score": profile_row.qualification_score,
+                "budget_min_usd": profile_row.budget_min_usd,
+                "budget_max_usd": profile_row.budget_max_usd,
+                "preferred_districts": profile_row.preferred_districts or [],
+                "preferred_rooms": profile_row.preferred_rooms,
+                "purchase_timeline": profile_row.purchase_timeline,
+                "payment_method": profile_row.payment_method,
+                "qualification_score": profile_row.qualification_score,
             }
-
-        props_summary = await _build_properties_summary(session, db_user.company_id)
 
     await message.bot.send_chat_action(message.chat.id, "typing")
 
-    from src.services import ai_service
-    reply = await ai_service.run_consultation(
-        messages=history,
-        company_name=company_name,
-        client_profile=client_profile,
-        available_properties_summary=props_summary,
-    )
+    from src.services.ai_service import chat_with_client
+    async with AsyncSessionFactory() as ai_session:
+        reply = await chat_with_client(
+            user_message=message.text or "",
+            conversation_history=history[:-1],
+            client_profile=client_profile,
+            company_id=db_user.company_id or 0,
+            session=ai_session,
+        )
 
     # Save assistant reply
     async with AsyncSessionFactory() as session:

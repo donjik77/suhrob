@@ -163,6 +163,19 @@ class AuthMiddleware(BaseMiddleware):
                         role=preset_role if company_id is not None else UserRole.client,
                         company_id=company_id,
                     )
+                    if user.role == UserRole.client and company_id is not None:
+                        _bot = data.get("bot")
+                        if _bot:
+                            from src.services.notification_service import notify_new_user
+                            try:
+                                await notify_new_user(
+                                    new_user=user,
+                                    company=company,
+                                    bot=_bot,
+                                    session=session,
+                                )
+                            except Exception:
+                                pass
                 else:
                     if (
                         preset_role is not None

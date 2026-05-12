@@ -278,6 +278,205 @@ def generate_property_title(data: dict) -> str:
     return " — ".join(parts)
 
 
+# ─── Smart/Fast model routing ────────────────────────────────────────────────
+
+FAST_MODEL = "google/gemini-2.5-flash"
+SMART_MODEL = "anthropic/claude-haiku-4-5"
+
+_DISTRICTS = [
+    "mirzo ulug'bek", "yunusobod", "chilonzor", "yashnobod",
+    "sergeli", "yakkasaroy", "mirobod", "shayxontohur",
+    "vokzal", "register", "lola", "gagarin",
+    "samarqand", "kattaqo'rg'on", "urgut", "bulungur",
+]
+
+
+def is_complex(message: str, history_len: int) -> bool:
+    if history_len > 4:
+        return True
+    if len(message) > 100:
+        return True
+    simple_words = ["narxi", "qancha", "xona", "manzil", "qavat", "maydon"]
+    if any(w in message.lower() for w in simple_words) and len(message) < 50:
+        return False
+    return False
+
+
+def extract_district(message: str, history: list) -> str | None:
+    text = message.lower()
+    for d in _DISTRICTS:
+        if d in text:
+            return d.title()
+    for msg in reversed(history):
+        if msg.get("role") == "user":
+            t = msg.get("content", "").lower()
+            for d in _DISTRICTS:
+                if d in t:
+                    return d.title()
+    return None
+
+
+def extract_price(message: str, history: list) -> float | None:
+    patterns = [
+        r"(\d+)\s*ming",
+        r"(\d+)k\b",
+        r"\$(\d[\d,]+)",
+        r"(\d{4,6})",
+    ]
+    text = message.lower().replace(",", "")
+    for p in patterns:
+        m = re.search(p, text)
+        if m:
+            val = float(m.group(1).replace(",", ""))
+            if "ming" in text or "k" in text:
+                val *= 1000
+            if 5000 < val < 2_000_000:
+                return val
+    return None
+
+
+def extract_rooms(message: str, history: list) -> int | None:
+    m = re.search(r"(\d)\s*xona", message.lower())
+    if m:
+        return int(m.group(1))
+    return None
+
+
+async def build_properties_context(
+    company_id: int,
+    district: str | None,
+    price_max: float | None,
+    rooms: int | None,
+    session,
+) -> str:
+    from sqlalchemy import select
+    from src.db.models import Property, PropertyStatus
+
+    q = select(Property).where(
+        Property.company_id == company_id,
+        Property.status == PropertyStatus.active,
+    )
+    if district:
+        q = q.where(Property.location_district.ilike(f"%{district}%"))
+    if price_max:
+        q = q.where(Property.price_usd <= price_max)
+    if rooms:
+        q = q.where(Property.rooms == rooms)
+
+    result = await session.execute(q.limit(5))
+    props = list(result.scalars())
+
+    if not props:
+        return "Hozircha bu parametrlarda mos uy yo'q."
+
+    lines = []
+    for p in props:
+        lines.append(
+            f"#ID_{p.id} | {p.property_type} | {p.location_district} | "
+            f"{p.rooms} xona | {p.floor}/{p.total_floors} qavat | "
+            f"{p.area_sqm} m² | ${p.price_usd:,.0f} | "
+            f"{p.description[:120] if p.description else ''}"
+        )
+    return "\n".join(lines)
+
+
+async def format_client_profile(profile: dict) -> str:
+    if not profile:
+        return "Yangi mijoz, ma'lumot yo'q."
+    parts = []
+    if profile.get("budget_min_usd"):
+        parts.append(f"Byudjet: ${profile['budget_min_usd']:,}–${profile.get('budget_max_usd', '?')}")
+    if profile.get("preferred_districts"):
+        parts.append(f"Tuman: {', '.join(profile['preferred_districts'])}")
+    if profile.get("preferred_rooms"):
+        parts.append(f"Xonalar: {profile['preferred_rooms']}")
+    if profile.get("payment_method"):
+        parts.append(f"To'lov: {profile['payment_method']}")
+    if profile.get("purchase_timeline"):
+        parts.append(f"Muddat: {profile['purchase_timeline']}")
+    return " | ".join(parts) if parts else "Parametrlar aniqlanmagan."
+
+
+async def format_agents_contacts(company_id: int, session) -> str:
+    from sqlalchemy import select
+    from src.db.models import User, UserRole
+
+    result = await session.execute(
+        select(User).where(
+            User.company_id == company_id,
+            User.role.in_([UserRole.agent, UserRole.director]),
+            User.is_blocked == False,
+        )
+    )
+    agents = list(result.scalars())
+    if not agents:
+        return "Agent ma'lumotlari yo'q."
+    lines = []
+    for a in agents:
+        line = f"\U0001f464 {a.full_name or 'Agent'}"
+        if a.phone:
+            line += f" — \U0001f4de {a.phone}"
+        if a.username:
+            line += f" (@{a.username})"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+async def chat_with_client(
+    user_message: str,
+    conversation_history: list[dict],
+    client_profile: dict,
+    company_id: int,
+    session,
+) -> str:
+    """Fast model (Gemini Flash) для простых вопросов, Smart model (Haiku) для сложных."""
+    import httpx
+    from src.services.ai_prompts import SYSTEM_PROMPT
+
+    district = extract_district(user_message, conversation_history)
+    price_max = extract_price(user_message, conversation_history)
+    rooms = extract_rooms(user_message, conversation_history)
+
+    properties = await build_properties_context(company_id, district, price_max, rooms, session)
+    profile_text = await format_client_profile(client_profile)
+    agents_text = await format_agents_contacts(company_id, session)
+
+    system = SYSTEM_PROMPT.format(
+        properties_context=properties,
+        client_profile=profile_text,
+        agents_contacts=agents_text,
+    )
+
+    model = SMART_MODEL if is_complex(user_message, len(conversation_history)) else FAST_MODEL
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            response = await http.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://suhrob-house.uz",
+                    "X-Title": "Suhrob HOUSE Bot",
+                },
+                json={
+                    "model": model,
+                    "temperature": 0.3,
+                    "max_tokens": 600,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        *conversation_history[-10:],
+                        {"role": "user", "content": user_message},
+                    ],
+                },
+            )
+            data = response.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        logger.warning("chat_with_client_failed", model=model, error=str(exc))
+        return "Kechirasiz, hozir texnik nosozlik bor. Iltimos, qaytadan urinib ko'ring."
+
+
 async def generate_follow_up_message(client_name: str, district: str, budget_str: str, day: int) -> str:
     """Generate a personalised follow-up message for day 3, 7, or 14."""
     prompt = f"""Mijozga follow-up xabar yoz (o'zbek tilida, lotin yozuvi).

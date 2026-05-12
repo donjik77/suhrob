@@ -3,6 +3,7 @@ from aiogram import Bot
 from aiogram.types import InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.bot.keyboards.styles import BTN_SUCCESS
 from src.db.models import Company, FileType
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
@@ -16,7 +17,7 @@ logger = structlog.get_logger(__name__)
 def _channel_inline_kb(bot_username: str, property_id: int) -> InlineKeyboardMarkup:
     url = f"https://t.me/{bot_username}?start=property_{property_id}"
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Botda ko'rish va savol berish", url=url)
+        InlineKeyboardButton(text="🤖 Bot orqali so'rash", url=url, style=BTN_SUCCESS)
     ]])
 
 
