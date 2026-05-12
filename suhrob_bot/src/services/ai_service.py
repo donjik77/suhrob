@@ -292,7 +292,7 @@ _DISTRICTS = [
 
 
 def is_complex(message: str, history_len: int) -> bool:
-    if history_len > 4:
+    if history_len > 10:
         return True
     if len(message) > 100:
         return True

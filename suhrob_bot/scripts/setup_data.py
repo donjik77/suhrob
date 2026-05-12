@@ -37,7 +37,7 @@ PAYMENT_SETTING_KEYS = (
     "currency_rate_uzs_per_usd",
 )
 
-CHANNEL_ID = "@samuylariix"
+CHANNEL_ID = "@samarqand_uylari1"
 
 
 async def main():

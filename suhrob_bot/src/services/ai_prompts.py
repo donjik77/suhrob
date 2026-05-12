@@ -75,4 +75,5 @@ TAQIQLANGAN IBORALAR
 ✗ "Aniq [narx]ga sotamiz" (narxni o'zgartirma)
 ✗ Bir vaqtda 2+ savol berish
 ✗ O'zbek tiliga boshqa tilni aralashtirib yozish
+✗ ** yoki __ yoki # markdown belgilarini ishlatish — faqat oddiy matn yoz
 """

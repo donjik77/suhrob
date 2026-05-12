@@ -546,20 +546,31 @@ async def _run_ai_processing(message: Message, state: FSMContext, bot: Bot, db_u
     }
 
     title = generate_property_title(ai_data)
-    description = await generate_property_description(ai_data)
 
     await state.update_data(
         photos=sorted_photos,
-        description=description,
         title=title,
-        ai_description=description,  # keep original for regen
     )
 
-    await state.set_state(AddPropertyStates.reviewing_preview)
-    await _show_review_preview(message, {**data, "photos": sorted_photos, "description": description})
+    await state.set_state(AddPropertyStates.entering_description)
+    await message.answer(
+        "✏️ <b>Tavsif kiriting:</b>\n\n"
+        "Obyekt haqida qisqacha tavsif yozing (2-5 gap).\n"
+        "Xususiyatlar, joylashuv, afzalliklar haqida yozing.",
+        parse_mode="HTML",
+    )
 
 
 # ─── Step 12: Review preview ──────────────────────────────────────────────────
+
+@router.message(AddPropertyStates.entering_description, F.text)
+async def description_entered(message: Message, state: FSMContext):
+    description = message.text.strip()
+    data = await state.get_data()
+    await state.update_data(description=description, ai_description=description)
+    await state.set_state(AddPropertyStates.reviewing_preview)
+    await _show_review_preview(message, {**data, "description": description})
+
 
 @router.callback_query(F.data == "ap_preview:confirm", AddPropertyStates.reviewing_preview)
 async def preview_confirm(callback: CallbackQuery, state: FSMContext, db_user: User, bot: Bot):

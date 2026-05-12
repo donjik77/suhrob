@@ -26,7 +26,9 @@ class AddPropertyStates(StatesGroup):
     entering_keywords = State()
     # Step 10: upload media
     uploading_media = State()
-    # Step 11: AI processing → Step 12: preview
+    # Step 11: manual description input
+    entering_description = State()
+    # Step 12: preview
     reviewing_preview = State()
     editing_description = State()     # inline edit of generated description
     waiting_custom_text = State()
