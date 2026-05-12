@@ -15,7 +15,13 @@ from src.db.session import AsyncSessionFactory
 from src.db.repositories.user_repo import UserRepository
 from src.bot.filters.role import RoleFilter
 from src.bot.keyboards.agent import agent_menu_kb
+from src.bot.keyboards.styles import BTN_DANGER, BTN_PRIMARY, BTN_SUCCESS
 from src.bot.handlers.director.company_scope import resolve_actor_company_id
+from src.services.deletion_service import (
+    ProtectedUserDeleteError,
+    count_user_properties,
+    delete_user_with_dependencies,
+)
 from locales.uz import t
 
 router = Router()
@@ -70,6 +76,7 @@ async def manage_agent(callback: CallbackQuery, db_user: User):
             )
         )
         agent = result.scalar_one_or_none()
+        prop_count = await count_user_properties(session, agent.id) if agent else 0
 
     if not agent:
         await callback.answer("Agent topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
@@ -78,13 +85,16 @@ async def manage_agent(callback: CallbackQuery, db_user: User):
     name = agent.full_name or agent.username or str(agent.telegram_user_id)
     builder = InlineKeyboardBuilder()
     if not agent.is_blocked:
-        builder.button(text="🚫 Bloklash", callback_data=f"agent_block:{agent_id}:1")
+        builder.button(text="🚫 Bloklash", callback_data=f"agent_block:{agent_id}:1", style=BTN_DANGER)
     else:
-        builder.button(text="✅ Blokdan chiqarish", callback_data=f"agent_block:{agent_id}:0")
+        builder.button(text="✅ Blokdan chiqarish", callback_data=f"agent_block:{agent_id}:0", style=BTN_SUCCESS)
+    builder.button(text="🗑 O'chirish", callback_data=f"agent_delete_confirm:{agent_id}", style=BTN_DANGER)
     builder.adjust(1)
 
     await callback.message.answer(
-        f"Agent: {name}\nStatus: {'🚫 Bloklangan' if agent.is_blocked else '✅ Faol'}",
+        f"Agent: {name}\n"
+        f"Status: {'🚫 Bloklangan' if agent.is_blocked else '✅ Faol'}\n"
+        f"Uylar: {prop_count}",
         reply_markup=builder.as_markup(),
     )
     await callback.answer()
@@ -131,6 +141,82 @@ async def toggle_agent_block(callback: CallbackQuery, db_user: User):
 
 
 # ─── Add Agent FSM ────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("agent_delete_confirm:"))
+async def confirm_agent_delete(callback: CallbackQuery, db_user: User):
+    agent_id = int(callback.data.split(":")[1])
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        agent = (
+            await session.execute(
+                sa_select(User).where(
+                    User.id == agent_id,
+                    User.company_id == company_id,
+                    User.role == UserRole.agent,
+                )
+            )
+        ).scalar_one_or_none()
+        prop_count = await count_user_properties(session, agent_id) if agent else 0
+
+    if not agent:
+        await callback.answer("Agent topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
+        return
+    if prop_count:
+        await callback.answer(
+            "Avval agentning uylarini o'chiring yoki boshqa agentga o'tkazing.",
+            show_alert=True,
+        )
+        return
+
+    name = agent.full_name or agent.username or str(agent.telegram_user_id)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Ha, o'chirish", callback_data=f"agent_delete:{agent_id}", style=BTN_DANGER)
+    builder.button(text="⬅️ Bekor qilish", callback_data=f"agent_manage:{agent_id}", style=BTN_PRIMARY)
+    builder.adjust(1)
+    await callback.message.answer(
+        f"Agentni o'chirishni tasdiqlaysizmi?\n\n{name}",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("agent_delete:"))
+async def delete_agent(callback: CallbackQuery, db_user: User):
+    agent_id = int(callback.data.split(":")[1])
+    company_id = await resolve_actor_company_id(db_user)
+    if company_id is None:
+        await callback.answer("Kompaniya topilmadi.", show_alert=True)
+        return
+
+    async with AsyncSessionFactory() as session:
+        agent = (
+            await session.execute(
+                sa_select(User).where(
+                    User.id == agent_id,
+                    User.company_id == company_id,
+                    User.role == UserRole.agent,
+                )
+            )
+        ).scalar_one_or_none()
+        if not agent:
+            await callback.answer("Agent topilmadi yoki sizning kompaniyangizdan emas", show_alert=True)
+            return
+        try:
+            await delete_user_with_dependencies(session, agent_id)
+        except ProtectedUserDeleteError:
+            await callback.answer(
+                "Agentni o'chirib bo'lmadi: avval bog'langan uylarni tozalang.",
+                show_alert=True,
+            )
+            return
+
+    await callback.answer("Agent o'chirildi", show_alert=True)
+    await callback.message.delete()
+
 
 class AddAgentStates(StatesGroup):
     waiting_full_name = State()

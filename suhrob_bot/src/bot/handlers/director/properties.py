@@ -12,6 +12,7 @@ from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
 from src.bot.filters.role import RoleFilter
+from src.bot.keyboards.styles import BTN_DANGER, BTN_PRIMARY, BTN_SUCCESS
 from src.bot.utils.property_media import answer_property_media_card
 from src.services.deletion_service import delete_property_with_dependencies
 from src.services.publisher_service import PublisherService
@@ -142,9 +143,9 @@ async def view_any_property(callback: CallbackQuery, db_user: User, bot: Bot):
         card = format_property_card(prop, rate)
 
         builder = InlineKeyboardBuilder()
-        builder.button(text="📢 E'lon qilish", callback_data=f"all_prop_publish:{property_id}")
-        builder.button(text="🗑 O'chirish", callback_data=f"all_prop_delete:{property_id}")
-        builder.button(text="⬅️ Orqaga", callback_data="all_props_page:1")
+        builder.button(text="📢 E'lon qilish", callback_data=f"all_prop_publish:{property_id}", style=BTN_SUCCESS)
+        builder.button(text="🗑 O'chirish", callback_data=f"all_prop_delete:{property_id}", style=BTN_DANGER)
+        builder.button(text="⬅️ Orqaga", callback_data="all_props_page:1", style=BTN_PRIMARY)
         builder.adjust(2, 1)
 
         await answer_property_media_card(

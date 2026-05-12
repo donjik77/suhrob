@@ -151,6 +151,7 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
             client_profile=client_profile,
             company_id=db_user.company_id or 0,
             session=ai_session,
+            property_id=property_id,
         )
 
     # Save assistant reply

@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from src.db.models import User, UserRole, LeadAssignment, LeadStatus, ClientProfile
 from src.db.session import AsyncSessionFactory
 from src.bot.filters.role import RoleFilter
+from src.services.deletion_service import ProtectedUserDeleteError, delete_user_with_dependencies
 
 router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
@@ -326,11 +327,82 @@ async def director_lead_detail(callback: CallbackQuery, db_user: User):
         for status, label in STATUS_LABELS.items()
         if status != lead.status
     ]
+    rows = [status_buttons[i:i+2] for i in range(0, len(status_buttons), 2)]
+    rows.append([
+        InlineKeyboardButton(
+            text="🗑 Mijozni o'chirish",
+            callback_data=f"director_client_delete_confirm:{client.id}",
+        )
+    ])
     kb = InlineKeyboardMarkup(
-        inline_keyboard=[status_buttons[i:i+2] for i in range(0, len(status_buttons), 2)]
+        inline_keyboard=rows
     )
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("director_client_delete_confirm:"))
+async def director_confirm_client_delete(callback: CallbackQuery, db_user: User):
+    if db_user.role not in (UserRole.director, UserRole.developer):
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+    client_id = int(callback.data.split(":")[1])
+
+    async with AsyncSessionFactory() as session:
+        client = (
+            await session.execute(
+                select(User).where(
+                    User.id == client_id,
+                    User.role == UserRole.client,
+                    User.company_id == db_user.company_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    if not client:
+        await callback.answer("Mijoz topilmadi yoki kompaniyangizdan emas", show_alert=True)
+        return
+
+    name = client.full_name or client.username or str(client.telegram_user_id)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"director_client_delete:{client_id}")],
+        [InlineKeyboardButton(text="⬅️ Bekor qilish", callback_data="noop")],
+    ])
+    await callback.message.answer(
+        f"Mijozni o'chirishni tasdiqlaysizmi?\n\n{name}",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("director_client_delete:"))
+async def director_delete_client(callback: CallbackQuery, db_user: User):
+    if db_user.role not in (UserRole.director, UserRole.developer):
+        await callback.answer("❌ Ruxsat yo'q", show_alert=True)
+        return
+    client_id = int(callback.data.split(":")[1])
+
+    async with AsyncSessionFactory() as session:
+        client = (
+            await session.execute(
+                select(User).where(
+                    User.id == client_id,
+                    User.role == UserRole.client,
+                    User.company_id == db_user.company_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not client:
+            await callback.answer("Mijoz topilmadi yoki kompaniyangizdan emas", show_alert=True)
+            return
+        try:
+            await delete_user_with_dependencies(session, client_id)
+        except ProtectedUserDeleteError:
+            await callback.answer("Mijozni o'chirib bo'lmadi.", show_alert=True)
+            return
+
+    await callback.answer("Mijoz o'chirildi", show_alert=True)
+    await callback.message.delete()
 
 
 @router.callback_query(F.data.startswith("lead_update:"))

@@ -348,9 +348,32 @@ async def build_properties_context(
     price_max: float | None,
     rooms: int | None,
     session,
+    property_id: int | None = None,
 ) -> str:
     from sqlalchemy import select
     from src.db.models import Property, PropertyStatus
+
+    if property_id:
+        selected = (
+            await session.execute(
+                select(Property).where(
+                    Property.id == property_id,
+                    Property.company_id == company_id,
+                    Property.status == PropertyStatus.active,
+                )
+            )
+        ).scalar_one_or_none()
+        if selected:
+            return (
+                "Tanlangan obyekt konteksti:\n"
+                f"#ID_{selected.id} | {selected.title} | {selected.property_type.value} | "
+                f"{selected.location_district} | {selected.location_address or ''} | "
+                f"{selected.rooms} xona | {selected.floor}/{selected.total_floors} qavat | "
+                f"{selected.area_sqm} m² | ${selected.price_usd:,.0f} | "
+                f"{selected.description or ''}\n\n"
+                "Mijoz aynan shu obyekt haqida so'rayapti. "
+                "Faqat shu ma'lumotlarga tayaning; yetishmaydigan ma'lumot uchun agentga ulashni taklif qiling."
+            )
 
     q = select(Property).where(
         Property.company_id == company_id,
@@ -428,6 +451,7 @@ async def chat_with_client(
     client_profile: dict,
     company_id: int,
     session,
+    property_id: int | None = None,
 ) -> str:
     """Fast model (Gemini Flash) для простых вопросов, Smart model (Haiku) для сложных."""
     import httpx
@@ -437,7 +461,14 @@ async def chat_with_client(
     price_max = extract_price(user_message, conversation_history)
     rooms = extract_rooms(user_message, conversation_history)
 
-    properties = await build_properties_context(company_id, district, price_max, rooms, session)
+    properties = await build_properties_context(
+        company_id,
+        district,
+        price_max,
+        rooms,
+        session,
+        property_id=property_id,
+    )
     profile_text = await format_client_profile(client_profile)
     agents_text = await format_agents_contacts(company_id, session)
 

@@ -9,6 +9,7 @@ from src.db.models import (
     SearchRequest, ClientProfile
 )
 from src.db.session import AsyncSessionFactory
+from src.db.repositories.stats_repo import StatsRepository
 from src.bot.filters.role import RoleFilter
 from src.bot.handlers.director.company_scope import resolve_actor_company_id
 
@@ -137,34 +138,7 @@ async def full_dashboard(message: Message, db_user: User):
             )
         ).scalar_one()
 
-        # Client stats
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        clients_total = (
-            await session.execute(
-                select(func.count(User.id)).where(
-                    User.company_id == cid,
-                    User.role == UserRole.client,
-                )
-            )
-        ).scalar_one() or 0
-        clients_today = (
-            await session.execute(
-                select(func.count(User.id)).where(
-                    User.company_id == cid,
-                    User.role == UserRole.client,
-                    User.created_at >= today_start,
-                )
-            )
-        ).scalar_one() or 0
-        clients_period = (
-            await session.execute(
-                select(func.count(User.id)).where(
-                    User.company_id == cid,
-                    User.role == UserRole.client,
-                    User.created_at >= since,
-                )
-            )
-        ).scalar_one() or 0
+        user_stats = await StatsRepository(session).get_new_users_stats(cid)
 
     conversion = f"{(won / max(new_leads, 1)) * 100:.1f}%" if new_leads else "0%"
 
@@ -186,9 +160,9 @@ async def full_dashboard(message: Message, db_user: User):
         f"✅ Sotilgan (30 kun): {total_sold}",
         "\n──────────────",
         f"👥 <b>Mijozlar:</b>",
-        f"   Jami: <b>{clients_total}</b>",
-        f"   Bugun yangi: <b>{clients_today}</b>",
-        f"   30 kunda yangi: <b>{clients_period}</b>",
+        f"   Jami: <b>{user_stats['total']}</b>",
+        f"   Bugun yangi: <b>{user_stats['new_today']}</b>",
+        f"   {user_stats['days']} kunda yangi: <b>{user_stats['new_period']}</b>",
         "\n──────────────",
         "👥 <b>Agentlar reytingi:</b>",
     ]

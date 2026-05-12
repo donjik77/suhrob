@@ -241,13 +241,16 @@ async def notify_new_user(new_user: User, company: Company, bot, session) -> Non
     company_name = company.name if company else "—"
     username = getattr(new_user, "username", None)
     username_text = f"@{username}" if username else "—"
+    created_at = getattr(new_user, "created_at", None)
+    created_at_text = created_at.strftime("%d.%m.%Y %H:%M") if created_at else "—"
 
     text = (
         f"🔔 <b>Yangi mijoz!</b>\n\n"
         f"👤 Ism: {new_user.full_name or '—'}\n"
         f"💬 Username: {username_text}\n"
         f"🆔 Telegram ID: <code>{new_user.telegram_user_id}</code>\n"
-        f"🏢 Kompaniya: {company_name}"
+        f"🏢 Kompaniya: {company_name}\n"
+        f"🕐 Vaqt: {created_at_text}"
     )
 
     staff: list[User] = []
@@ -280,7 +283,9 @@ async def notify_new_user(new_user: User, company: Company, bot, session) -> Non
             user_id=new_user.id,
             notification_type=NotificationType.new_client,
             related_subscription_id=None,
+            message_text=text,
         )
         session.add(log)
+        await session.commit()
     except Exception as exc:
         logger.warning("notify_new_user_log_failed", user_id=new_user.id, error=str(exc))

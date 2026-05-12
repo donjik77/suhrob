@@ -3,6 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from src.db.models import UserRole
+from src.bot.keyboards.styles import BTN_DANGER, BTN_PRIMARY, BTN_SUCCESS
 from locales.uz import t
 
 # ─── Feature definitions (used in multi-select step) ─────────────────────────
@@ -146,10 +147,10 @@ def media_done_kb(photo_count: int, video_count: int = 0) -> InlineKeyboardMarku
 
 def preview_action_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="✅ Hammasi yaxshi",      callback_data="ap_preview:confirm")
-    b.button(text="✏️ Matnni o'zgartirish",    callback_data="ap_preview:edit_text")
-    b.button(text="🤖 AI dan boshqa variant",  callback_data="ap_preview:regen")
-    b.button(text="❌ Bekor qilish",         callback_data="ap_preview:cancel")
+    b.button(text="✅ Hammasi yaxshi",      callback_data="ap_preview:confirm", style=BTN_SUCCESS)
+    b.button(text="✏️ Matnni o'zgartirish",    callback_data="ap_preview:edit_text", style=BTN_PRIMARY)
+    b.button(text="🤖 AI dan boshqa variant",  callback_data="ap_preview:regen", style=BTN_PRIMARY)
+    b.button(text="❌ Bekor qilish",         callback_data="ap_preview:cancel", style=BTN_DANGER)
     b.adjust(1)
     return b.as_markup()
 
@@ -157,9 +158,9 @@ def preview_action_kb() -> InlineKeyboardMarkup:
 def publish_options_kb(property_id: int | None = None) -> InlineKeyboardMarkup:
     suffix = f":{property_id}" if property_id is not None else ""
     b = InlineKeyboardBuilder()
-    b.button(text="📢 Hozir publikatsiya",       callback_data=f"ap_pub:now{suffix}")
-    b.button(text="⏰ Keyinchalik rejalashtirish", callback_data=f"ap_pub:schedule{suffix}")
-    b.button(text="💾 Faqat bazaga saqlash",      callback_data=f"ap_pub:save_only{suffix}")
+    b.button(text="📢 Hozir publikatsiya",       callback_data=f"ap_pub:now{suffix}", style=BTN_SUCCESS)
+    b.button(text="⏰ Keyinchalik rejalashtirish", callback_data=f"ap_pub:schedule{suffix}", style=BTN_PRIMARY)
+    b.button(text="💾 Faqat bazaga saqlash",      callback_data=f"ap_pub:save_only{suffix}", style=BTN_SUCCESS)
     b.adjust(1)
     return b.as_markup()
 
@@ -204,8 +205,8 @@ def parsed_preview_kb() -> InlineKeyboardMarkup:
     b.button(text="✏️ Maydon",   callback_data="edit_field:area_sqm")
     b.button(text="✏️ Narx",     callback_data="edit_field:price_usd")
     b.button(text="✏️ Tavsif",   callback_data="edit_field:description")
-    b.button(text="✅ Tasdiqlash", callback_data="parsed_confirm")
-    b.button(text="❌ Bekor qilish", callback_data="parsed_cancel")
+    b.button(text="✅ Tasdiqlash", callback_data="parsed_confirm", style=BTN_SUCCESS)
+    b.button(text="❌ Bekor qilish", callback_data="parsed_cancel", style=BTN_DANGER)
     b.adjust(2, 2, 2, 2, 1, 1)
     return b.as_markup()
 
@@ -233,30 +234,30 @@ def my_properties_nav_kb(page: int, total_pages: int) -> InlineKeyboardMarkup:
 
 def property_actions_kb(property_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=t("btn_view"),          callback_data=f"prop_action:view:{property_id}")
-    builder.button(text=t("btn_edit"),          callback_data=f"prop_action:edit:{property_id}")
-    builder.button(text=t("btn_delete"),        callback_data=f"prop_action:delete:{property_id}")
-    builder.button(text=t("btn_change_status"), callback_data=f"prop_action:status:{property_id}")
-    builder.button(text=t("btn_republish"),     callback_data=f"prop_action:publish:{property_id}")
-    builder.button(text=t("back"),              callback_data="my_props_page:1")
+    builder.button(text=t("btn_view"),          callback_data=f"prop_action:view:{property_id}", style=BTN_PRIMARY)
+    builder.button(text=t("btn_edit"),          callback_data=f"prop_action:edit:{property_id}", style=BTN_PRIMARY)
+    builder.button(text=t("btn_delete"),        callback_data=f"prop_action:delete:{property_id}", style=BTN_DANGER)
+    builder.button(text=t("btn_change_status"), callback_data=f"prop_action:status:{property_id}", style=BTN_PRIMARY)
+    builder.button(text=t("btn_republish"),     callback_data=f"prop_action:publish:{property_id}", style=BTN_SUCCESS)
+    builder.button(text=t("back"),              callback_data="my_props_page:1", style=BTN_PRIMARY)
     builder.adjust(2, 2, 1, 1)
     return builder.as_markup()
 
 
 def property_status_kb(property_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Faol",       callback_data=f"prop_setstatus:{property_id}:active")
-    builder.button(text="✔️ Sotilgan",  callback_data=f"prop_setstatus:{property_id}:sold")
-    builder.button(text="🙈 Yashirish", callback_data=f"prop_setstatus:{property_id}:hidden")
-    builder.button(text=t("back"),      callback_data=f"prop_action:view:{property_id}")
+    builder.button(text="✅ Faol",       callback_data=f"prop_setstatus:{property_id}:active", style=BTN_SUCCESS)
+    builder.button(text="✔️ Sotilgan",  callback_data=f"prop_setstatus:{property_id}:sold", style=BTN_SUCCESS)
+    builder.button(text="🙈 Yashirish", callback_data=f"prop_setstatus:{property_id}:hidden", style=BTN_DANGER)
+    builder.button(text=t("back"),      callback_data=f"prop_action:view:{property_id}", style=BTN_PRIMARY)
     builder.adjust(3, 1)
     return builder.as_markup()
 
 
 def delete_confirm_kb(property_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Ha, o'chir", callback_data=f"prop_confirm_delete:{property_id}")
-    builder.button(text="❌ Yo'q",       callback_data=f"prop_action:view:{property_id}")
+    builder.button(text="✅ Ha, o'chir", callback_data=f"prop_confirm_delete:{property_id}", style=BTN_DANGER)
+    builder.button(text="❌ Yo'q",       callback_data=f"prop_action:view:{property_id}", style=BTN_PRIMARY)
     builder.adjust(2)
     return builder.as_markup()
 
@@ -276,7 +277,7 @@ def edit_property_fields_kb(property_id: int) -> InlineKeyboardMarkup:
     ]
     for label, field in fields:
         builder.button(text=label, callback_data=f"edit_prop_field:{property_id}:{field}")
-    builder.button(text="✅ Tayyor", callback_data=f"prop_action:view:{property_id}")
+    builder.button(text="✅ Tayyor", callback_data=f"prop_action:view:{property_id}", style=BTN_SUCCESS)
     builder.adjust(2, 2, 2, 2, 1, 1)
     return builder.as_markup()
 

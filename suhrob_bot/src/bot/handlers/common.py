@@ -88,5 +88,3 @@ async def _show_property_deeplink(
         await message.answer(
             "💬 Shu uy haqida savollaringizni yozing, men yordam beraman.\n\n❌ Chiqish uchun /stop yozing.",
         )
-
-    await message.answer(t("welcome", name=message.from_user.full_name or "Foydalanuvchi"), reply_markup=main_menu_kb(), parse_mode="HTML")

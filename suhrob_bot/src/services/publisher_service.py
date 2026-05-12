@@ -1,9 +1,9 @@
 import structlog
 from aiogram import Bot
-from aiogram.types import InputMediaPhoto, InputMediaVideo, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InputMediaPhoto, InputMediaVideo
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.bot.keyboards.styles import BTN_SUCCESS
+from src.bot.keyboards.channel import build_channel_property_kb
 from src.db.models import Company, FileType
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
@@ -12,13 +12,6 @@ from src.bot.utils.message_entities import load_message_entities
 from src.utils.formatters import format_channel_post
 
 logger = structlog.get_logger(__name__)
-
-
-def _channel_inline_kb(bot_username: str, property_id: int) -> InlineKeyboardMarkup:
-    url = f"https://t.me/{bot_username}?start=property_{property_id}"
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🤖 Bot orqali so'rash", url=url, style=BTN_SUCCESS)
-    ]])
 
 
 async def _copy_source_text_message(bot: Bot, *, chat_id, prop, reply_markup=None) -> str:
@@ -174,8 +167,19 @@ class PublisherService:
 
         # Inline button for deep link back to bot
         reply_markup = None
-        if company.bot_username:
-            reply_markup = _channel_inline_kb(company.bot_username, property_id)
+        if not property_id:
+            logger.warning(
+                "channel_property_button_missing_property_id",
+                company_id=getattr(company, "id", None),
+            )
+        elif company.bot_username:
+            reply_markup = build_channel_property_kb(company.bot_username, property_id)
+        else:
+            logger.error(
+                "channel_property_button_missing_bot_username",
+                company_id=getattr(company, "id", None),
+                property_id=property_id,
+            )
 
         media_items = [m for m in prop.media if m.file_type in (FileType.photo, FileType.video)]
         custom_text = prop.custom_text

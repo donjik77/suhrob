@@ -92,7 +92,7 @@ async def agent_stats(message: Message, db_user: User):
         t("stats_views", count=int(views_count or 0)),
         t("stats_inquiries", count=int(leads_count or 0)),
         t("stats_contacts", count=int(contacts_count or 0)),
-        f"🟢 Bugun yangi lидlar (sizga): <b>{new_leads_today}</b>",
+        f"🟢 Bugun yangi mijozlar: <b>{new_leads_today}</b>",
         "",
         "👥 <b>Kompaniya mijozlari:</b>",
         f"   Jami: <b>{company_clients_total}</b>",
