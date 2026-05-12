@@ -61,6 +61,16 @@ class BotManager:
         asyncio.create_task(self._start_polling(bot))
         logger.info("bot_added", company_id=company_id, bot_username=bot_info.username)
 
+        if bot_info.username:
+            from sqlalchemy import update
+            async with AsyncSessionFactory() as session:
+                await session.execute(
+                    update(Company)
+                    .where(Company.id == company_id)
+                    .values(bot_username=bot_info.username)
+                )
+                await session.commit()
+
     async def remove_bot(self, company_id: int) -> None:
         bot = self._bots.pop(company_id, None)
         if bot is None:
