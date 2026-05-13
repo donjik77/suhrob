@@ -2,18 +2,28 @@
 AI consultation handler — free dialog with Claude for clients.
 Triggered by main menu button or property card inline button.
 """
+import re
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import select, insert
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from src.db.models import User, UserRole, Company, ClientProfile, ClientConversation, Property, LeadAssignment, LeadStatus
+from src.db.models import (
+    User, UserRole, Company, ClientProfile, ClientConversation, Property,
+    PropertyStatus, LeadAssignment, LeadStatus,
+)
 from src.db.session import AsyncSessionFactory
 from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.bot.keyboards.client import property_card_kb
+from src.bot.utils.property_media import answer_property_media_card
 from src.config import settings
+from src.db.repositories.settings_repo import SettingsRepository
 from src.services import ai_service
+from src.utils.formatters import format_property_card
 from locales.uz import t
 
 router = Router()
@@ -33,6 +43,73 @@ async def check_ai_limit(user_id: int, redis, daily_limit: int = AI_DAILY_LIMIT)
 
 class ConsultState(StatesGroup):
     chatting = State()
+
+
+_CARD_MARKER_RE = re.compile(r"\[CARD\s*:\s*(\d+)\]", re.IGNORECASE)
+_VISIBLE_PROPERTY_ID_RE = re.compile(r"(?:CARD_)?(?:#\s*)?ID[_:\-\s]*(\d+)", re.IGNORECASE)
+
+
+def _extract_property_card_ids(reply: str) -> list[int]:
+    ids: list[int] = []
+    for pattern in (_CARD_MARKER_RE, _VISIBLE_PROPERTY_ID_RE):
+        for match in pattern.finditer(reply or ""):
+            prop_id = int(match.group(1))
+            if prop_id not in ids:
+                ids.append(prop_id)
+    return ids
+
+
+def _clean_ai_reply_for_cards(reply: str) -> str:
+    lines = []
+    for line in (reply or "").splitlines():
+        if _CARD_MARKER_RE.search(line) or _VISIBLE_PROPERTY_ID_RE.search(line):
+            continue
+        lines.append(line)
+
+    text = "\n".join(lines).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text or "Tayyor jigar, mos uylarni kartochka qilib yuboryapman."
+
+
+async def _send_ai_property_cards(message: Message, company_id: int | None, property_ids: list[int]) -> None:
+    if not company_id or not property_ids:
+        return
+
+    async with AsyncSessionFactory() as session:
+        result = await session.execute(
+            select(Property)
+            .where(
+                Property.company_id == company_id,
+                Property.status == PropertyStatus.active,
+                Property.id.in_(property_ids),
+            )
+            .options(selectinload(Property.media), selectinload(Property.agent))
+        )
+        props_by_id = {prop.id: prop for prop in result.scalars().all()}
+        props = [props_by_id[prop_id] for prop_id in property_ids if prop_id in props_by_id]
+
+        if not props:
+            return
+
+        await session.execute(
+            update(Property)
+            .where(Property.company_id == company_id, Property.id.in_([prop.id for prop in props]))
+            .values(views_count=Property.views_count + 1)
+        )
+        await session.commit()
+
+        settings_repo = SettingsRepository(session)
+        rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
+
+        for prop in props:
+            await answer_property_media_card(
+                message,
+                media_items=prop.media,
+                caption=format_property_card(prop, rate),
+                reply_markup=property_card_kb(prop.id),
+                parse_mode="HTML",
+                caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
+            )
 
 
 # ------------------------------------------------------------------ #
@@ -145,7 +222,7 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
 
     from src.services.ai_service import chat_with_client
     async with AsyncSessionFactory() as ai_session:
-        reply = await chat_with_client(
+        raw_reply = await chat_with_client(
             user_message=message.text or "",
             conversation_history=history[:-1],
             client_profile=client_profile,
@@ -153,6 +230,8 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
             session=ai_session,
             property_id=property_id,
         )
+    property_card_ids = _extract_property_card_ids(raw_reply)
+    reply = _clean_ai_reply_for_cards(raw_reply) if property_card_ids else raw_reply
 
     # Save assistant reply
     async with AsyncSessionFactory() as session:
@@ -174,6 +253,7 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
             await _maybe_assign_hot_lead(session, db_user, qualification, message.bot)
 
     await message.answer(reply)
+    await _send_ai_property_cards(message, db_user.company_id, property_card_ids)
 
 
 # ------------------------------------------------------------------ #

@@ -42,6 +42,9 @@ router = Router()
 router.message.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserRole.developer))
 
+MAX_PROPERTY_PHOTOS = 10
+MAX_PROPERTY_VIDEOS = 2
+
 # Default districts shown when DB has no prior properties yet
 _DEFAULT_DISTRICTS = [
     "Mirzo Ulug'bek", "Yunusobod", "Chilonzor", "Yakkasaroy",
@@ -474,7 +477,7 @@ async def receive_photo(message: Message, state: FSMContext):
     photos: list = list(data.get("photos", []))
     videos: list = list(data.get("videos", []))
 
-    if len(photos) >= 10:
+    if len(photos) >= MAX_PROPERTY_PHOTOS:
         await message.answer(t("ap_media_limit_photo"), reply_markup=media_done_kb(len(photos), len(videos)))
         return
 
@@ -489,7 +492,7 @@ async def receive_video(message: Message, state: FSMContext):
     photos: list = list(data.get("photos", []))
     videos: list = list(data.get("videos", []))
 
-    if len(videos) >= 2:
+    if len(videos) >= MAX_PROPERTY_VIDEOS:
         await message.answer(t("ap_media_limit_video"), reply_markup=media_done_kb(len(photos), len(videos)))
         return
 

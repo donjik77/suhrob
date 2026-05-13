@@ -187,7 +187,22 @@ class PublisherService:
         try:
             if custom_text:
                 entities = load_message_entities(prop.custom_text_entities_json)
-                if media_items and len(custom_text) <= 1024:
+                if media_items and prop.custom_text_source_has_media and prop.custom_text_source_chat_id:
+                    post_id = await _copy_source_text_message(
+                        self.bot,
+                        chat_id=channel_id,
+                        prop=prop,
+                        reply_markup=reply_markup,
+                    )
+                    remaining_media = media_items[1:]
+                    if remaining_media:
+                        await _send_media_items(
+                            self.bot,
+                            chat_id=channel_id,
+                            media_items=remaining_media,
+                        )
+
+                elif media_items and len(custom_text) <= 1024:
                     msgs = await _send_media_items(
                         self.bot,
                         chat_id=channel_id,

@@ -366,7 +366,7 @@ async def build_properties_context(
         if selected:
             return (
                 "Tanlangan obyekt konteksti:\n"
-                f"#ID_{selected.id} | {selected.title} | {selected.property_type.value} | "
+                f"CARD_ID:{selected.id} | {selected.title} | {selected.property_type.value} | "
                 f"{selected.location_district} | {selected.location_address or ''} | "
                 f"{selected.rooms} xona | {selected.floor}/{selected.total_floors} qavat | "
                 f"{selected.area_sqm} m² | ${selected.price_usd:,.0f} | "
@@ -395,7 +395,8 @@ async def build_properties_context(
     lines = []
     for p in props:
         lines.append(
-            f"#ID_{p.id} | {p.property_type} | {p.location_district} | "
+            f"CARD_ID:{p.id} | {p.property_type.value} | {p.location_district} | "
+            f"{p.location_address or ''} | "
             f"{p.rooms} xona | {p.floor}/{p.total_floors} qavat | "
             f"{p.area_sqm} m² | ${p.price_usd:,.0f} | "
             f"{p.description[:120] if p.description else ''}"

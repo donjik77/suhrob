@@ -4,7 +4,11 @@ import unittest
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/test")
 os.environ.setdefault("DEVELOPER_TELEGRAM_ID", "1")
 
-from src.bot.handlers.client.ai_consultation import check_ai_limit
+from src.bot.handlers.client.ai_consultation import (
+    _clean_ai_reply_for_cards,
+    _extract_property_card_ids,
+    check_ai_limit,
+)
 
 
 class FakeRedis:
@@ -45,6 +49,20 @@ class AILimitTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await check_ai_limit(1, redis, daily_limit=1), (True, 1))
         self.assertEqual(await check_ai_limit(2, redis, daily_limit=1), (True, 1))
         self.assertEqual(await check_ai_limit(1, redis, daily_limit=1), (False, 2))
+
+
+class AIPropertyCardMarkerTest(unittest.TestCase):
+    def test_extracts_card_markers_and_legacy_visible_ids(self):
+        reply = "Tayyor jigar\n[CARD:25]\n1. **#ID_26** - Vokzal"
+
+        self.assertEqual(_extract_property_card_ids(reply), [25, 26])
+
+    def test_removes_card_marker_lines_from_client_reply(self):
+        reply = "Tayyor jigar, kartochka qilib yuboryapman.\n[CARD:25]\n1. #ID_26 - Vokzal"
+
+        cleaned = _clean_ai_reply_for_cards(reply)
+
+        self.assertEqual(cleaned, "Tayyor jigar, kartochka qilib yuboryapman.")
 
 
 if __name__ == "__main__":
