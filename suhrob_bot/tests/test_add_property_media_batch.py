@@ -75,6 +75,29 @@ class AddPropertyMediaBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("5 ta rasm", calls[0][1][0])
         self.assertIn("reply_markup", calls[0][2])
 
+    async def test_separate_video_joins_pending_photo_batch(self):
+        calls = []
+        state = FakeState({"photos": [], "videos": []})
+
+        add_property._queue_media_group_item(
+            FakeMessage(calls, media_group_id="album-1"),
+            state,
+            photos=[{"file_id": "photo-1"}],
+        )
+        add_property._queue_media_group_item(
+            FakeMessage(calls),
+            state,
+            videos=[{"file_id": "video-1"}],
+        )
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual([item["file_id"] for item in state.data["photos"]], ["photo-1"])
+        self.assertEqual([item["file_id"] for item in state.data["videos"]], ["video-1"])
+        self.assertEqual(len(calls), 1)
+        self.assertIn("1 ta rasm", calls[0][1][0])
+        self.assertIn("1 ta video", calls[0][1][0])
+
     async def test_photo_limit_is_applied_to_whole_batch(self):
         calls = []
         state = FakeState({"photos": [], "videos": []})

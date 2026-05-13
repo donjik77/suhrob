@@ -44,10 +44,10 @@ router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserR
 
 MAX_PROPERTY_PHOTOS = 10
 MAX_PROPERTY_VIDEOS = 2
-MEDIA_GROUP_COLLECT_DELAY = 0.8
+MEDIA_GROUP_COLLECT_DELAY = 1.5
 
-_MEDIA_GROUP_BUFFERS: dict[tuple[int, int, str], dict] = {}
-_MEDIA_GROUP_TASKS: dict[tuple[int, int, str], asyncio.Task] = {}
+_MEDIA_GROUP_BUFFERS: dict[tuple[int, int], dict] = {}
+_MEDIA_GROUP_TASKS: dict[tuple[int, int], asyncio.Task] = {}
 _MEDIA_STATE_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
 
 # Default districts shown when DB has no prior properties yet
@@ -237,14 +237,6 @@ def _media_state_lock(message: Message) -> asyncio.Lock:
     return lock
 
 
-def _media_group_key(message: Message) -> tuple[int, int, str] | None:
-    media_group_id = getattr(message, "media_group_id", None)
-    if not media_group_id:
-        return None
-    chat_id, user_id = _media_state_key(message)
-    return chat_id, user_id, str(media_group_id)
-
-
 def _queue_media_group_item(
     message: Message,
     state: FSMContext,
@@ -252,10 +244,7 @@ def _queue_media_group_item(
     photos: list[dict] | None = None,
     videos: list[dict] | None = None,
 ) -> bool:
-    key = _media_group_key(message)
-    if key is None:
-        return False
-
+    key = _media_state_key(message)
     buffer = _MEDIA_GROUP_BUFFERS.setdefault(
         key,
         {"message": message, "state": state, "photos": [], "videos": []},
@@ -272,7 +261,7 @@ def _queue_media_group_item(
     return True
 
 
-async def _flush_media_group_later(key: tuple[int, int, str]) -> None:
+async def _flush_media_group_later(key: tuple[int, int]) -> None:
     try:
         await asyncio.sleep(MEDIA_GROUP_COLLECT_DELAY)
         buffer = _MEDIA_GROUP_BUFFERS.pop(key, None)
@@ -639,20 +628,14 @@ async def enter_keywords(message: Message, state: FSMContext):
 @router.message(AddPropertyStates.uploading_media, F.photo)
 async def receive_photo(message: Message, state: FSMContext):
     item = {"file_id": message.photo[-1].file_id}
-    if _queue_media_group_item(message, state, photos=[item]):
-        return
-
-    await _add_media_batch(message, state, photos=[item])
+    _queue_media_group_item(message, state, photos=[item])
 
 
 @router.message(AddPropertyStates.uploading_media, F.video | F.document)
 async def receive_video(message: Message, state: FSMContext):
     file_id = message.video.file_id if message.video else message.document.file_id
     item = {"file_id": file_id}
-    if _queue_media_group_item(message, state, videos=[item]):
-        return
-
-    await _add_media_batch(message, state, videos=[item])
+    _queue_media_group_item(message, state, videos=[item])
 
 
 @router.callback_query(F.data == "ap_media:done", AddPropertyStates.uploading_media)

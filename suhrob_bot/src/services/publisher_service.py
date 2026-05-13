@@ -250,7 +250,7 @@ class PublisherService:
                         caption=caption,
                         parse_mode="HTML",
                         reply_markup=reply_markup,
-                        button_text="👆 Batafsil ma'lumot va savol uchun:",
+                        button_text=" 👇🏻Batafsil ma'lumot va savol uchun:",
                     )
                     post_id = str(msgs[0].message_id)
                 else:
