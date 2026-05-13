@@ -44,6 +44,11 @@ router.callback_query.filter(RoleFilter(UserRole.agent, UserRole.director, UserR
 
 MAX_PROPERTY_PHOTOS = 10
 MAX_PROPERTY_VIDEOS = 2
+MEDIA_GROUP_COLLECT_DELAY = 0.8
+
+_MEDIA_GROUP_BUFFERS: dict[tuple[int, int, str], dict] = {}
+_MEDIA_GROUP_TASKS: dict[tuple[int, int, str], asyncio.Task] = {}
+_MEDIA_STATE_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
 
 # Default districts shown when DB has no prior properties yet
 _DEFAULT_DISTRICTS = [
@@ -216,6 +221,166 @@ async def _score_and_sort_photos(bot: Bot, photos: list[dict]) -> list[dict]:
 
     scored = await asyncio.gather(*[_score_one(p) for p in photos])
     return sorted(scored, key=lambda x: x.get("score", 5.0), reverse=True)
+
+
+def _media_state_key(message: Message) -> tuple[int, int]:
+    user_id = message.from_user.id if message.from_user else 0
+    return message.chat.id, user_id
+
+
+def _media_state_lock(message: Message) -> asyncio.Lock:
+    key = _media_state_key(message)
+    lock = _MEDIA_STATE_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _MEDIA_STATE_LOCKS[key] = lock
+    return lock
+
+
+def _media_group_key(message: Message) -> tuple[int, int, str] | None:
+    media_group_id = getattr(message, "media_group_id", None)
+    if not media_group_id:
+        return None
+    chat_id, user_id = _media_state_key(message)
+    return chat_id, user_id, str(media_group_id)
+
+
+def _queue_media_group_item(
+    message: Message,
+    state: FSMContext,
+    *,
+    photos: list[dict] | None = None,
+    videos: list[dict] | None = None,
+) -> bool:
+    key = _media_group_key(message)
+    if key is None:
+        return False
+
+    buffer = _MEDIA_GROUP_BUFFERS.setdefault(
+        key,
+        {"message": message, "state": state, "photos": [], "videos": []},
+    )
+    buffer["message"] = message
+    buffer["state"] = state
+    buffer["photos"].extend(photos or [])
+    buffer["videos"].extend(videos or [])
+
+    task = _MEDIA_GROUP_TASKS.get(key)
+    if task and not task.done():
+        task.cancel()
+    _MEDIA_GROUP_TASKS[key] = asyncio.create_task(_flush_media_group_later(key))
+    return True
+
+
+async def _flush_media_group_later(key: tuple[int, int, str]) -> None:
+    try:
+        await asyncio.sleep(MEDIA_GROUP_COLLECT_DELAY)
+        buffer = _MEDIA_GROUP_BUFFERS.pop(key, None)
+        _MEDIA_GROUP_TASKS.pop(key, None)
+        if not buffer:
+            return
+        await _add_media_batch(
+            buffer["message"],
+            buffer["state"],
+            photos=buffer["photos"],
+            videos=buffer["videos"],
+        )
+    except asyncio.CancelledError:
+        return
+    except Exception as exc:
+        logger.warning("media_group_flush_failed", error=str(exc))
+
+
+def _media_batch_text(
+    *,
+    added_photos: int,
+    added_videos: int,
+    photo_count: int,
+    video_count: int,
+    skipped_photos: int,
+    skipped_videos: int,
+) -> str:
+    if not added_photos and not added_videos:
+        return "❌ Limit to'ldi. Tayyor tugmasini bosing."
+
+    added_parts = []
+    if added_photos:
+        added_parts.append(f"{added_photos} ta rasm")
+    if added_videos:
+        added_parts.append(f"{added_videos} ta video")
+
+    total_parts = []
+    if photo_count:
+        total_parts.append(f"{photo_count} ta rasm")
+    if video_count:
+        total_parts.append(f"{video_count} ta video")
+
+    text = f"✅ {', '.join(added_parts)} qabul qilindi.\nJami: {', '.join(total_parts)}."
+    if skipped_photos or skipped_videos:
+        text += "\nLimit: maksimal 10 ta rasm va 2 ta video."
+    return text
+
+
+async def _add_media_batch(
+    message: Message,
+    state: FSMContext,
+    *,
+    photos: list[dict] | None = None,
+    videos: list[dict] | None = None,
+) -> None:
+    photos = photos or []
+    videos = videos or []
+    if not photos and not videos:
+        return
+
+    async with _media_state_lock(message):
+        data = await state.get_data()
+        stored_photos: list = list(data.get("photos", []))
+        stored_videos: list = list(data.get("videos", []))
+        existing_photo_ids = {item.get("file_id") for item in stored_photos if isinstance(item, dict)}
+        existing_video_ids = {item.get("file_id") for item in stored_videos if isinstance(item, dict)}
+
+        added_photos = 0
+        skipped_photos = 0
+        for item in photos:
+            file_id = item.get("file_id")
+            if not file_id or file_id in existing_photo_ids:
+                continue
+            if len(stored_photos) >= MAX_PROPERTY_PHOTOS:
+                skipped_photos += 1
+                continue
+            stored_photos.append(item)
+            existing_photo_ids.add(file_id)
+            added_photos += 1
+
+        added_videos = 0
+        skipped_videos = 0
+        for item in videos:
+            file_id = item.get("file_id")
+            if not file_id or file_id in existing_video_ids:
+                continue
+            if len(stored_videos) >= MAX_PROPERTY_VIDEOS:
+                skipped_videos += 1
+                continue
+            stored_videos.append(item)
+            existing_video_ids.add(file_id)
+            added_videos += 1
+
+        await state.update_data(photos=stored_photos, videos=stored_videos)
+        photo_count = len(stored_photos)
+        video_count = len(stored_videos)
+
+    await message.answer(
+        _media_batch_text(
+            added_photos=added_photos,
+            added_videos=added_videos,
+            photo_count=photo_count,
+            video_count=video_count,
+            skipped_photos=skipped_photos,
+            skipped_videos=skipped_videos,
+        ),
+        reply_markup=media_done_kb(photo_count, video_count),
+    )
 
 
 # ─── Step 1: Entry → choose property type ────────────────────────────────────
@@ -473,33 +638,21 @@ async def enter_keywords(message: Message, state: FSMContext):
 
 @router.message(AddPropertyStates.uploading_media, F.photo)
 async def receive_photo(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos: list = list(data.get("photos", []))
-    videos: list = list(data.get("videos", []))
-
-    if len(photos) >= MAX_PROPERTY_PHOTOS:
-        await message.answer(t("ap_media_limit_photo"), reply_markup=media_done_kb(len(photos), len(videos)))
+    item = {"file_id": message.photo[-1].file_id}
+    if _queue_media_group_item(message, state, photos=[item]):
         return
 
-    photos.append({"file_id": message.photo[-1].file_id})
-    await state.update_data(photos=photos)
-    await message.answer(t("ap_media_received", count=len(photos)), reply_markup=media_done_kb(len(photos), len(videos)))
+    await _add_media_batch(message, state, photos=[item])
 
 
 @router.message(AddPropertyStates.uploading_media, F.video | F.document)
 async def receive_video(message: Message, state: FSMContext):
-    data = await state.get_data()
-    photos: list = list(data.get("photos", []))
-    videos: list = list(data.get("videos", []))
-
-    if len(videos) >= MAX_PROPERTY_VIDEOS:
-        await message.answer(t("ap_media_limit_video"), reply_markup=media_done_kb(len(photos), len(videos)))
+    file_id = message.video.file_id if message.video else message.document.file_id
+    item = {"file_id": file_id}
+    if _queue_media_group_item(message, state, videos=[item]):
         return
 
-    file_id = message.video.file_id if message.video else message.document.file_id
-    videos.append({"file_id": file_id})
-    await state.update_data(videos=videos)
-    await message.answer(t("ap_video_received", count=len(videos)), reply_markup=media_done_kb(len(photos), len(videos)))
+    await _add_media_batch(message, state, videos=[item])
 
 
 @router.callback_query(F.data == "ap_media:done", AddPropertyStates.uploading_media)
