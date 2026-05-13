@@ -26,6 +26,17 @@ class FakeBot:
         self.calls.append(("send_photo", args, kwargs))
         return SimpleNamespace(message_id=101)
 
+    async def send_video(self, *args, **kwargs):
+        self.calls.append(("send_video", args, kwargs))
+        return SimpleNamespace(message_id=102)
+
+    async def send_media_group(self, *args, **kwargs):
+        self.calls.append(("send_media_group", args, kwargs))
+        return [
+            SimpleNamespace(message_id=200 + index)
+            for index, _media in enumerate(kwargs.get("media", []))
+        ]
+
 
 class FakeSession:
     def __init__(self, company):
@@ -122,7 +133,7 @@ class PublisherServiceTest(unittest.IsolatedAsyncioTestCase):
         finally:
             publisher_service.PropertyRepository = original_repo
 
-    async def test_publish_copies_media_caption_source_and_sends_only_remaining_media(self):
+    async def test_publish_sends_custom_text_media_as_single_album(self):
         original_repo = publisher_service.PropertyRepository
         publisher_service.PropertyRepository = FakePropertyRepository
         try:
@@ -153,9 +164,13 @@ class PublisherServiceTest(unittest.IsolatedAsyncioTestCase):
             success, _message = await PublisherService(FakeSession(company), bot).publish(7)
 
             self.assertTrue(success)
-            self.assertEqual(FakePropertyRepository.updated_post_id, "99")
-            self.assertEqual([call[0] for call in bot.calls], ["copy_message", "send_photo"])
-            self.assertEqual(bot.calls[1][2]["photo"], "photo-2")
+            self.assertEqual(FakePropertyRepository.updated_post_id, "200")
+            self.assertEqual([call[0] for call in bot.calls], ["send_media_group"])
+            media_group = bot.calls[0][2]["media"]
+            self.assertEqual(len(media_group), 2)
+            self.assertEqual(media_group[0].caption, FakePropertyRepository.prop.custom_text)
+            self.assertEqual(media_group[0].caption_entities[0].type, "custom_emoji")
+            self.assertEqual(media_group[1].media, "photo-2")
         finally:
             publisher_service.PropertyRepository = original_repo
 

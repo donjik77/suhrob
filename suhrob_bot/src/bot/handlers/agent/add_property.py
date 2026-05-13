@@ -154,13 +154,13 @@ def _preview_media_items(data: dict) -> list[dict]:
     ]
 
 
-async def _show_review_preview(message: Message, data: dict) -> dict | None:
+async def _show_review_preview(message: Message, data: dict) -> None:
     custom_text = data.get("custom_text")
     if custom_text:
         media_items = _preview_media_items(data)
         entities_json = data.get("custom_text_entities_json")
         if media_items and len(custom_text) <= 1024:
-            sent_messages = await answer_property_media_card(
+            await answer_property_media_card(
                 message,
                 media_items=media_items,
                 caption=custom_text,
@@ -168,14 +168,7 @@ async def _show_review_preview(message: Message, data: dict) -> dict | None:
                 parse_mode=None,
                 caption_entities_json=entities_json,
             )
-            source_message = sent_messages[0] if sent_messages else None
-            if source_message:
-                return {
-                    "custom_text_source_chat_id": source_message.chat.id,
-                    "custom_text_source_message_id": source_message.message_id,
-                    "custom_text_source_has_media": True,
-                }
-            return None
+            return
 
         if media_items:
             await answer_property_media_card(
@@ -190,7 +183,7 @@ async def _show_review_preview(message: Message, data: dict) -> dict | None:
             entities_json,
             reply_markup=preview_action_kb(),
         )
-        return None
+        return
 
     preview_text = _build_preview_text(data)
     await answer_property_media_card(
@@ -200,7 +193,6 @@ async def _show_review_preview(message: Message, data: dict) -> dict | None:
         reply_markup=preview_action_kb(),
         parse_mode="HTML",
     )
-    return None
 
 
 async def _score_and_sort_photos(bot: Bot, photos: list[dict]) -> list[dict]:
@@ -731,9 +723,7 @@ async def save_custom_text(message: Message, state: FSMContext, db_user: User, b
     )
     await state.set_state(AddPropertyStates.reviewing_preview)
     data = await state.get_data()
-    preview_source = await _show_review_preview(message, data)
-    if preview_source:
-        await state.update_data(**preview_source)
+    await _show_review_preview(message, data)
 
 
 @router.callback_query(F.data == "ap_preview:cancel", AddPropertyStates.reviewing_preview)
