@@ -42,6 +42,13 @@ class ChannelSubscriptionMiddleware(BaseMiddleware):
                 return event.callback_query.from_user.id
         return None
 
+    def _message_or_callback(self, event: TelegramObject) -> Message | CallbackQuery | None:
+        if isinstance(event, (Message, CallbackQuery)):
+            return event
+        if isinstance(event, Update):
+            return event.message or event.callback_query
+        return None
+
     async def _is_subscribed(self, event: Message | CallbackQuery, user_id: int) -> bool:
         member = await event.bot.get_chat_member(self.channel_id, user_id)
         if member.status in self._ACTIVE_STATUSES:
@@ -78,7 +85,8 @@ class ChannelSubscriptionMiddleware(BaseMiddleware):
         if user is None or user.role == UserRole.developer:
             return await handler(event, data)
 
-        if not isinstance(event, (Message, CallbackQuery)):
+        effective_event = self._message_or_callback(event)
+        if effective_event is None:
             return await handler(event, data)
 
         user_id = self._event_user_id(event)
@@ -86,7 +94,7 @@ class ChannelSubscriptionMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         try:
-            if await self._is_subscribed(event, user_id):
+            if await self._is_subscribed(effective_event, user_id):
                 return await handler(event, data)
         except Exception as exc:
             logger.warning(
@@ -96,5 +104,5 @@ class ChannelSubscriptionMiddleware(BaseMiddleware):
                 error=str(exc),
             )
 
-        await self._send_required_message(event)
+        await self._send_required_message(effective_event)
         return None
