@@ -1,7 +1,7 @@
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import User, UserRole, Company
@@ -13,6 +13,30 @@ from src.utils.formatters import format_property_card
 from locales.uz import t
 
 router = Router()
+
+
+@router.callback_query(F.data == "check_channel_subscription")
+async def check_channel_subscription(callback: CallbackQuery, db_user: User, state: FSMContext):
+    if callback.message is None:
+        await callback.answer("Obuna tasdiqlandi", show_alert=True)
+        return
+
+    name = callback.from_user.full_name or callback.from_user.username or "Foydalanuvchi"
+    await state.clear()
+
+    if db_user.role == UserRole.client:
+        await callback.message.answer(
+            t("welcome", name=name),
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML",
+        )
+    else:
+        await callback.message.answer(
+            t("agent_menu_welcome", name=name),
+            reply_markup=agent_menu_kb(db_user.role),
+            parse_mode="HTML",
+        )
+    await callback.answer("Obuna tasdiqlandi", show_alert=True)
 
 
 @router.message(Command("start"))

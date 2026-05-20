@@ -5,6 +5,13 @@ from locales.uz import t
 from src.bot.keyboards.styles import BTN_SUCCESS, BTN_PRIMARY, BTN_DANGER
 
 
+def request_client_phone_kb() -> ReplyKeyboardMarkup:
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="Telefon raqamni yuborish", request_contact=True)
+    kb.adjust(1)
+    return kb.as_markup(resize_keyboard=True, one_time_keyboard=True)
+
+
 def main_menu_kb() -> ReplyKeyboardMarkup:
     kb = ReplyKeyboardBuilder()
     kb.button(text=t("btn_search"))

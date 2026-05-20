@@ -11,6 +11,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from src.config import settings
 from src.bot.manager import BotManager
 from src.bot.middlewares.auth import AuthMiddleware
+from src.bot.middlewares.channel_subscription import ChannelSubscriptionMiddleware
 from src.bot.middlewares.company_context import CompanyContextMiddleware
 from src.bot.middlewares.subscription import SubscriptionMiddleware
 from src.bot.middlewares.logging import LoggingMiddleware
@@ -135,6 +136,7 @@ async def main():
     dp.update.outer_middleware(LoggingMiddleware())
     dp.update.outer_middleware(CompanyContextMiddleware(bot_manager))
     dp.update.outer_middleware(AuthMiddleware())
+    dp.update.outer_middleware(ChannelSubscriptionMiddleware())
     dp.update.outer_middleware(SubscriptionMiddleware())
 
     register_routers(dp)

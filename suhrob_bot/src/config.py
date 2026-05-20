@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
     AI_DAILY_LIMIT_PER_USER: int = 50
 
+    # Public channel users must join before using the bot.
+    REQUIRE_CHANNEL_SUBSCRIPTION: bool = True
+    REQUIRED_CHANNEL_ID: str = "@samarqand_uylari1"
+    REQUIRED_CHANNEL_URL: str = "https://t.me/samarqand_uylari1"
+
     MEDIA_PATH: str = "/var/suhrob_bot/media"
     LOG_LEVEL: str = "INFO"
     TIMEZONE: str = "Asia/Tashkent"
@@ -45,7 +50,7 @@ class Settings(BaseSettings):
     CURRENCY_RATE_UZS_PER_USD: int = 12600
     PAYMENT_CLICK_CARD: str = "QR CODNI SKANERLANG"
     PAYMENT_CLICK_HOLDER: str = "BAHTIYOROV DONJIK"
-    PAYMENT_CLICK_QR_FILE_ID: str = "C:\suhrob\suhrob_bot\media\click.jpg"
+    PAYMENT_CLICK_QR_FILE_ID: str = r"C:\suhrob\suhrob_bot\media\click.jpg"
     PAYMENT_HUMO_CARD: str = "9869100126034816"
     PAYMENT_HUMO_HOLDER: str = "BAHTIYOROV DONJIK"
     PAYMENT_HUMO_QR_FILE_ID: str = ""

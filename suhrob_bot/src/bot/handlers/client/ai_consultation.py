@@ -5,7 +5,7 @@ Triggered by main menu button or property card inline button.
 import re
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, update
@@ -18,7 +18,8 @@ from src.db.models import (
 )
 from src.db.session import AsyncSessionFactory
 from src.bot.handlers.client.property_access import get_active_property_for_client
-from src.bot.keyboards.client import property_card_kb
+from src.bot.keyboards.client import property_card_kb, request_client_phone_kb
+from src.bot.handlers.client.favorites import _extract_phone
 from src.bot.utils.property_media import answer_property_media_card
 from src.config import settings
 from src.db.repositories.settings_repo import SettingsRepository
@@ -43,10 +44,15 @@ async def check_ai_limit(user_id: int, redis, daily_limit: int = AI_DAILY_LIMIT)
 
 class ConsultState(StatesGroup):
     chatting = State()
+    waiting_phone_for_agent = State()
 
 
 _CARD_MARKER_RE = re.compile(r"\[CARD\s*:\s*(\d+)\]", re.IGNORECASE)
 _VISIBLE_PROPERTY_ID_RE = re.compile(r"(?:CARD_)?(?:#\s*)?ID[_:\-\s]*(\d+)", re.IGNORECASE)
+_AGENT_CONNECT_RE = re.compile(
+    r"(agent|makler|rieltor|bog'?la|boglan|bog'lan|aloqa|telefon|ko'rish|korish|uchrash)",
+    re.IGNORECASE,
+)
 
 
 def _extract_property_card_ids(reply: str) -> list[int]:
@@ -69,6 +75,10 @@ def _clean_ai_reply_for_cards(reply: str) -> str:
     text = "\n".join(lines).strip()
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text or "Tayyor jigar, mos uylarni kartochka qilib yuboryapman."
+
+
+def _wants_agent_connection(text: str | None) -> bool:
+    return bool(_AGENT_CONNECT_RE.search(text or ""))
 
 
 async def _send_ai_property_cards(message: Message, company_id: int | None, property_ids: list[int]) -> None:
@@ -152,6 +162,45 @@ async def start_consultation_property(callback: CallbackQuery, db_user: User, co
 #  Message handler inside consultation
 # ------------------------------------------------------------------ #
 
+@router.message(ConsultState.waiting_phone_for_agent)
+async def receive_ai_agent_phone(message: Message, db_user: User, state: FSMContext):
+    phone = _extract_phone(message)
+    if not phone:
+        await message.answer(
+            "Telefon raqam noto'g'ri. Kontakt tugmasi orqali yuboring yoki +998901234567 formatida yozing.",
+            reply_markup=request_client_phone_kb(),
+        )
+        return
+
+    data = await state.get_data()
+    property_id = data.get("property_id")
+    qualification = data.get("qualification") or {}
+
+    async with AsyncSessionFactory() as session:
+        await session.execute(
+            update(User)
+            .where(User.id == db_user.id)
+            .values(phone=phone)
+        )
+        await session.commit()
+        db_user.phone = phone
+        await _maybe_assign_hot_lead(
+            session,
+            db_user,
+            qualification,
+            message.bot,
+            client_phone=phone,
+            property_id=property_id,
+        )
+
+    await state.set_state(ConsultState.chatting)
+    await state.update_data(property_id=property_id)
+    await message.answer(
+        "Rahmat! Telefon raqamingiz agentga yuborildi.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
 @router.message(ConsultState.chatting)
 async def handle_consultation_message(message: Message, db_user: User, state: FSMContext):
     if message.text and message.text.startswith("/stop"):
@@ -233,6 +282,9 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
     property_card_ids = _extract_property_card_ids(raw_reply)
     reply = _clean_ai_reply_for_cards(raw_reply) if property_card_ids else raw_reply
 
+    wants_agent = _wants_agent_connection(message.text)
+    needs_phone_for_agent = False
+
     # Save assistant reply
     async with AsyncSessionFactory() as session:
         session.add(ClientConversation(
@@ -248,12 +300,30 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
         qualification = await ai_service.qualify_client(all_history)
         await _upsert_client_profile(session, db_user.id, qualification)
 
-        # Auto-assign hot lead to agents
-        if qualification.get("qualification_score", 0) >= 70:
-            await _maybe_assign_hot_lead(session, db_user, qualification, message.bot)
+        # Auto-assign hot leads, but collect the client's phone before notifying agents.
+        should_connect_agent = qualification.get("qualification_score", 0) >= 70 or wants_agent
+        if should_connect_agent:
+            if db_user.phone:
+                await _maybe_assign_hot_lead(
+                    session,
+                    db_user,
+                    qualification,
+                    message.bot,
+                    client_phone=db_user.phone,
+                    property_id=property_id,
+                )
+            else:
+                needs_phone_for_agent = True
 
     await message.answer(reply)
     await _send_ai_property_cards(message, db_user.company_id, property_card_ids)
+    if needs_phone_for_agent:
+        await state.set_state(ConsultState.waiting_phone_for_agent)
+        await state.update_data(property_id=property_id, qualification=qualification)
+        await message.answer(
+            "Agent bilan bog'lash uchun telefon raqamingizni yuboring.",
+            reply_markup=request_client_phone_kb(),
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -330,7 +400,7 @@ async def _upsert_client_profile(session: AsyncSession, user_id: int, data: dict
     await session.commit()
 
 
-async def _maybe_assign_hot_lead(session: AsyncSession, client: User, qualification: dict, bot) -> None:
+async def _maybe_assign_hot_lead_legacy(session: AsyncSession, client: User, qualification: dict, bot) -> None:
     from sqlalchemy import select as _select
     existing = (
         await session.execute(
@@ -384,6 +454,98 @@ async def _maybe_assign_hot_lead(session: AsyncSession, client: User, qualificat
         payment_method=qualification.get("payment_method") or "—",
         summary=qualification.get("summary") or "—",
     )
+
+    try:
+        await bot.send_message(agent.telegram_user_id, msg, parse_mode="HTML")
+    except Exception:
+        import structlog
+        structlog.get_logger().warning("hot_lead_notify_failed", agent_id=agent.id)
+
+
+async def _maybe_assign_hot_lead(
+    session: AsyncSession,
+    client: User,
+    qualification: dict,
+    bot,
+    *,
+    client_phone: str | None = None,
+    property_id: int | None = None,
+) -> None:
+    from sqlalchemy import select as _select
+    from src.db.models import UserRole as UR
+
+    existing = (
+        await session.execute(
+            _select(LeadAssignment).where(
+                LeadAssignment.client_user_id == client.id,
+                LeadAssignment.status == LeadStatus.new,
+            )
+        )
+    ).scalar_one_or_none()
+
+    agent = None
+    if existing:
+        agent = await session.get(User, existing.agent_user_id)
+    elif property_id:
+        prop = (
+            await session.execute(
+                _select(Property).where(
+                    Property.id == property_id,
+                    Property.company_id == client.company_id,
+                    Property.status == PropertyStatus.active,
+                )
+            )
+        ).scalar_one_or_none()
+        if prop:
+            agent = await session.get(User, prop.agent_id)
+
+    if agent is None:
+        agent = (
+            await session.execute(
+                _select(User).where(
+                    User.company_id == client.company_id,
+                    User.role == UR.agent,
+                    User.is_blocked == False,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+
+    if not agent:
+        return
+
+    if not existing:
+        session.add(
+            LeadAssignment(
+                client_user_id=client.id,
+                agent_user_id=agent.id,
+                property_id=property_id,
+                status=LeadStatus.new,
+                notes=qualification.get("summary", ""),
+            )
+        )
+        await session.commit()
+
+    score = qualification.get("qualification_score", 0)
+    budget_min = qualification.get("budget_min_usd")
+    budget_max = qualification.get("budget_max_usd")
+    budget = f"${budget_min}-${budget_max}" if budget_min and budget_max else "-"
+    districts = ", ".join(qualification.get("preferred_districts") or []) or "-"
+    rooms = ", ".join(str(r) for r in (qualification.get("preferred_rooms") or [])) or "-"
+    phone = client_phone or client.phone or "-"
+    username = f"@{client.username}" if client.username else "-"
+
+    msg = t(
+        "hot_lead_notify",
+        client_name=client.full_name or client.username or "Anonim",
+        score=score,
+        budget=budget,
+        districts=districts,
+        rooms=rooms,
+        timeline=qualification.get("purchase_timeline") or "-",
+        payment_method=qualification.get("payment_method") or "-",
+        summary=qualification.get("summary") or "-",
+    )
+    msg += f"\n\nTelefon: {phone}\nTelegram: {username}"
 
     try:
         await bot.send_message(agent.telegram_user_id, msg, parse_mode="HTML")
