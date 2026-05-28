@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Bot
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,28 @@ from locales.uz import t
 import structlog
 
 logger = structlog.get_logger()
+
+DEFAULT_MONTHLY_PRICE_USD = Decimal("49")
+
+
+def _positive_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+    return amount if amount.is_finite() and amount > 0 else default
+
+
+def _next_payment_price_usd(subscription_price_usd, monthly_price_usd) -> Decimal:
+    current_price = _positive_decimal(subscription_price_usd)
+    if current_price > 0:
+        return current_price
+
+    configured_price = _positive_decimal(monthly_price_usd)
+    if configured_price > 0:
+        return configured_price
+
+    return DEFAULT_MONTHLY_PRICE_USD
 
 
 class NotificationService:
@@ -40,6 +62,9 @@ class NotificationService:
 
         settings_repo = SettingsRepository(self.session)
         rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
+        monthly_price_usd = await settings_repo.get_decimal(
+            "monthly_price_usd", DEFAULT_MONTHLY_PRICE_USD
+        )
 
         for sub in subs:
             already_sent = await self._already_sent(
@@ -49,8 +74,9 @@ class NotificationService:
                 continue
 
             users = await self._get_company_users(sub.company_id)
-            price_uzs = usd_to_uzs(sub.price_usd, rate)
-            msg = t("notify_3days", price=int(sub.price_usd), price_uzs=price_uzs)
+            price_usd = _next_payment_price_usd(sub.price_usd, monthly_price_usd)
+            price_uzs = usd_to_uzs(price_usd, rate)
+            msg = t("notify_3days", price=int(price_usd), price_uzs=price_uzs)
 
             for user in users:
                 await self._send(user, msg)
@@ -82,6 +108,9 @@ class NotificationService:
 
         settings_repo = SettingsRepository(self.session)
         rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
+        monthly_price_usd = await settings_repo.get_decimal(
+            "monthly_price_usd", DEFAULT_MONTHLY_PRICE_USD
+        )
 
         for sub in subs:
             already_sent = await self._already_sent(
@@ -92,17 +121,18 @@ class NotificationService:
 
             # Check director balance
             director = await self._get_director(sub.company_id)
+            price_usd = _next_payment_price_usd(sub.price_usd, monthly_price_usd)
             has_balance = False
             if director and director.balance:
-                has_balance = director.balance.balance_usd >= sub.price_usd
+                has_balance = director.balance.balance_usd >= price_usd
 
             users = await self._get_company_users(sub.company_id)
-            price_uzs = usd_to_uzs(sub.price_usd, rate)
+            price_uzs = usd_to_uzs(price_usd, rate)
             balance_status = "✅ Yetarli" if has_balance else "⚠️ Yetarli emas"
             msg = (
                 f"⏰ <b>Obuna 7 kundan so'ng tugaydi!</b>\n\n"
                 f"Muddat: {sub.period_end.strftime('%d.%m.%Y')}\n"
-                f"Narxi: ${int(sub.price_usd)} (~{price_uzs:,} so'm)\n"
+                f"Narxi: ${int(price_usd)} (~{price_uzs:,} so'm)\n"
                 f"Balans holati: {balance_status}"
             )
 
@@ -123,6 +153,9 @@ class NotificationService:
 
         settings_repo = SettingsRepository(self.session)
         rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
+        monthly_price_usd = await settings_repo.get_decimal(
+            "monthly_price_usd", DEFAULT_MONTHLY_PRICE_USD
+        )
 
         for sub in subs:
             director = await self._get_director(sub.company_id)
@@ -130,7 +163,7 @@ class NotificationService:
 
             if director and director.balance:
                 balance: UserBalance = director.balance
-                price = Decimal(str(sub.price_usd))
+                price = _next_payment_price_usd(sub.price_usd, monthly_price_usd)
                 if balance.balance_usd >= price:
                     # Deduct and renew
                     balance.balance_usd -= price
@@ -147,8 +180,8 @@ class NotificationService:
                     new_sub = Subscription(
                         company_id=sub.company_id,
                         subscription_type=sub.subscription_type,
-                        price_usd=sub.price_usd,
-                        price_uzs=sub.price_uzs,
+                        price_usd=price,
+                        price_uzs=usd_to_uzs(price, rate),
                         period_start=now,
                         period_end=now + timedelta(days=30),
                         status=SubscriptionStatus.active,

@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from src.bot.keyboards.agent import publish_options_kb
 from src.bot.keyboards.payment import invoice_payment_method_kb
 from src.db.models import SubscriptionStatus
 from src.db.repositories.subscription_repo import SubscriptionRepository
+from src.services.notification_service import _next_payment_price_usd
 
 
 def _now():
@@ -82,6 +84,16 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         source = Path("src/bot/handlers/director/subscription.py").read_text(encoding="utf-8")
 
         self.assertIn('F.data.startswith("pay_invoice_method:")', source)
+
+    def test_trial_subscription_next_payment_uses_monthly_price(self):
+        self.assertEqual(
+            _next_payment_price_usd(Decimal("0"), Decimal("49")),
+            Decimal("49"),
+        )
+        self.assertEqual(
+            _next_payment_price_usd(Decimal("25"), Decimal("49")),
+            Decimal("25"),
+        )
 
 
 class PublishKeyboardTest(unittest.TestCase):
