@@ -13,6 +13,13 @@ class SubscriptionRepository:
     def _now(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
+    def _as_utc_naive(self, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
     async def get_active(self, company_id: int) -> Optional[Subscription]:
         now = self._now()
         result = await self.session.execute(
@@ -56,7 +63,8 @@ class SubscriptionRepository:
             SubscriptionStatus.blocked,
         ):
             return True
-        return sub.period_end is not None and sub.period_end < self._now()
+        period_end = self._as_utc_naive(sub.period_end)
+        return period_end is not None and period_end < self._now()
 
     async def create(self, company_id: int, price_usd=49, price_uzs=None) -> Subscription:
         sub = Subscription(

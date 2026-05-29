@@ -17,6 +17,8 @@ Telegram-bot for a real estate company in Uzbekistan. Supports client property s
 ```bash
 cp .env.example .env
 # Edit .env: set BOT_TOKEN, DEVELOPER_TELEGRAM_ID, DB_PASSWORD
+# For local docker-compose, DATABASE_URL must use the same DB_PASSWORD:
+# postgresql+asyncpg://suhrob:<DB_PASSWORD>@db:5432/suhrob_bot
 ```
 
 ### 2. Start services
@@ -62,6 +64,16 @@ docker-compose logs -f bot
 | `MEDIA_PATH` | Local path for media files |
 | `LOG_LEVEL` | INFO / DEBUG / WARNING |
 | `TIMEZONE` | e.g. Asia/Tashkent |
+
+### Railway database credentials
+
+On Railway, set `DATABASE_URL` on the bot service from the Railway Postgres service variables. If Postgres credentials are regenerated, update the bot service's `DATABASE_URL` too. A stale password causes:
+
+```text
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+```
+
+Railway's `*.railway.internal` hosts only work from services inside the same Railway project/network.
 
 ## Adding an Agent
 

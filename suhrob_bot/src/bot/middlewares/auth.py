@@ -20,6 +20,13 @@ from src.config import settings
 
 
 class AuthMiddleware(BaseMiddleware):
+    def _message_or_callback(self, event: TelegramObject) -> Message | CallbackQuery | None:
+        if isinstance(event, (Message, CallbackQuery)):
+            return event
+        if isinstance(event, Update):
+            return event.message or event.callback_query
+        return None
+
     def _preset_role_for_telegram_id(self, telegram_id: int) -> Optional[UserRole]:
         if getattr(settings, "DIRECTOR_TELEGRAM_ID", None) == telegram_id:
             return UserRole.director
@@ -198,10 +205,11 @@ class AuthMiddleware(BaseMiddleware):
 
             # Blocked users cannot use the bot (developer is never blocked)
             if user.is_blocked and user.role != UserRole.developer:
-                if isinstance(event, Message):
-                    await event.answer("🔒 Sizning hisobingiz bloklangan. Administrator bilan bog'laning.")
-                elif isinstance(event, CallbackQuery):
-                    await event.answer("🔒 Hisob bloklangan", show_alert=True)
+                effective_event = self._message_or_callback(event)
+                if isinstance(effective_event, Message):
+                    await effective_event.answer("🔒 Sizning hisobingiz bloklangan. Administrator bilan bog'laning.")
+                elif isinstance(effective_event, CallbackQuery):
+                    await effective_event.answer("🔒 Hisob bloklangan", show_alert=True)
                 return
 
             data["db_user"] = user
