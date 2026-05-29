@@ -166,7 +166,14 @@ async def main():
         scheduler.start()
         logger.info("fallback_bot_started")
         try:
-            await dp.start_polling(dev_bot, allowed_updates=dp.resolve_used_update_types())
+            while True:
+                try:
+                    await dp.start_polling(dev_bot, allowed_updates=dp.resolve_used_update_types())
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.error("fallback_bot_polling_error", error=str(exc), retry_in_seconds=15)
+                    await asyncio.sleep(15)
         finally:
             scheduler.shutdown()
             await dev_bot.session.close()

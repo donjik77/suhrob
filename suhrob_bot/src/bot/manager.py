@@ -35,16 +35,18 @@ class BotManager:
         )
 
     async def _start_polling(self, bot: Bot) -> None:
-        try:
-            await self._dp.start_polling(
-                bot,
-                allowed_updates=self._dp.resolve_used_update_types(),
-                close_bot_session=False,
-            )
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            logger.error("bot_polling_error", bot_id=bot.id, error=str(exc))
+        while True:
+            try:
+                await self._dp.start_polling(
+                    bot,
+                    allowed_updates=self._dp.resolve_used_update_types(),
+                    close_bot_session=False,
+                )
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.error("bot_polling_error", bot_id=bot.id, error=str(exc), retry_in_seconds=15)
+                await asyncio.sleep(15)
 
     # ------------------------------------------------------------------ #
     #  Public API
@@ -92,7 +94,10 @@ class BotManager:
 
         for company in rows:
             if company.bot_token:
-                await self.add_bot(company.bot_token, company.id)
+                try:
+                    await self.add_bot(company.bot_token, company.id)
+                except Exception as exc:
+                    logger.error("bot_start_failed", company_id=company.id, error=str(exc))
 
         logger.info("bot_manager_started", count=len(self._bots))
 
