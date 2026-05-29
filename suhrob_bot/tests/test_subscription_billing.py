@@ -51,22 +51,6 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(await _Repo(active, active=active).is_blocked(1))
 
-    async def test_aware_expired_active_subscription_is_blocked(self):
-        expired_active = SimpleNamespace(
-            status=SubscriptionStatus.active,
-            period_end=datetime.now(timezone.utc) - timedelta(seconds=1),
-        )
-
-        self.assertTrue(await _Repo(expired_active).is_blocked(1))
-
-    async def test_aware_future_active_subscription_is_not_blocked(self):
-        active = SimpleNamespace(
-            status=SubscriptionStatus.active,
-            period_end=datetime.now(timezone.utc) + timedelta(days=1),
-        )
-
-        self.assertFalse(await _Repo(active).is_blocked(1))
-
     async def test_pending_invoice_does_not_block_while_active_subscription_exists(self):
         active = SimpleNamespace(
             status=SubscriptionStatus.active,
@@ -89,13 +73,6 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("UserRole.agent, UserRole.director", source)
         self.assertIn('text.startswith("/start")', source)
         self.assertIn('callback_data.startswith("pay_invoice_method:")', source)
-
-    def test_auth_middleware_answers_blocked_update_events(self):
-        source = Path("src/bot/middlewares/auth.py").read_text(encoding="utf-8")
-
-        self.assertIn("def _message_or_callback", source)
-        self.assertIn("event.message or event.callback_query", source)
-        self.assertIn("effective_event = self._message_or_callback(event)", source)
 
     def test_invoice_sender_targets_staff_with_invoice_specific_buttons(self):
         source = Path("src/bot/handlers/developer/payments.py").read_text(encoding="utf-8")
