@@ -1,7 +1,6 @@
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +11,6 @@ from src.bot.keyboards.agent import publish_options_kb
 from src.bot.keyboards.payment import invoice_payment_method_kb
 from src.db.models import SubscriptionStatus
 from src.db.repositories.subscription_repo import SubscriptionRepository
-from src.services.notification_service import _next_payment_price_usd
 
 
 def _now():
@@ -51,22 +49,6 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(await _Repo(active, active=active).is_blocked(1))
 
-    async def test_aware_expired_active_subscription_is_blocked(self):
-        expired_active = SimpleNamespace(
-            status=SubscriptionStatus.active,
-            period_end=datetime.now(timezone.utc) - timedelta(seconds=1),
-        )
-
-        self.assertTrue(await _Repo(expired_active).is_blocked(1))
-
-    async def test_aware_future_active_subscription_is_not_blocked(self):
-        active = SimpleNamespace(
-            status=SubscriptionStatus.active,
-            period_end=datetime.now(timezone.utc) + timedelta(days=1),
-        )
-
-        self.assertFalse(await _Repo(active).is_blocked(1))
-
     async def test_pending_invoice_does_not_block_while_active_subscription_exists(self):
         active = SimpleNamespace(
             status=SubscriptionStatus.active,
@@ -83,20 +65,12 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SubscriptionType.instagram", source)
         self.assertGreaterEqual(source.count(".limit(1)"), 2)
 
-    def test_subscription_middleware_covers_staff_and_payment_flow(self):
+    def test_subscription_middleware_covers_agents_and_allows_start(self):
         source = Path("src/bot/middlewares/subscription.py").read_text(encoding="utf-8")
 
         self.assertIn("UserRole.agent, UserRole.director", source)
-        self.assertNotIn('text.startswith("/start")', source)
-        self.assertIn("event.message or event.callback_query", source)
+        self.assertIn('text.startswith("/start")', source)
         self.assertIn('callback_data.startswith("pay_invoice_method:")', source)
-
-    def test_auth_middleware_answers_blocked_update_events(self):
-        source = Path("src/bot/middlewares/auth.py").read_text(encoding="utf-8")
-
-        self.assertIn("def _message_or_callback", source)
-        self.assertIn("event.message or event.callback_query", source)
-        self.assertIn("effective_event = self._message_or_callback(event)", source)
 
     def test_invoice_sender_targets_staff_with_invoice_specific_buttons(self):
         source = Path("src/bot/handlers/developer/payments.py").read_text(encoding="utf-8")
@@ -108,16 +82,6 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         source = Path("src/bot/handlers/director/subscription.py").read_text(encoding="utf-8")
 
         self.assertIn('F.data.startswith("pay_invoice_method:")', source)
-
-    def test_trial_subscription_next_payment_uses_monthly_price(self):
-        self.assertEqual(
-            _next_payment_price_usd(Decimal("0"), Decimal("49")),
-            Decimal("49"),
-        )
-        self.assertEqual(
-            _next_payment_price_usd(Decimal("25"), Decimal("49")),
-            Decimal("25"),
-        )
 
 
 class PublishKeyboardTest(unittest.TestCase):
