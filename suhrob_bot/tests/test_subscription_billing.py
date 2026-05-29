@@ -67,11 +67,11 @@ class SubscriptionBillingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SubscriptionType.instagram", source)
         self.assertGreaterEqual(source.count(".limit(1)"), 2)
 
-    def test_subscription_middleware_covers_all_company_users_and_payment_flow(self):
+    def test_subscription_middleware_covers_staff_and_payment_flow(self):
         source = Path("src/bot/middlewares/subscription.py").read_text(encoding="utf-8")
 
-        self.assertIn("UserRole.client, UserRole.agent, UserRole.director", source)
-        self.assertIn('t("service_blocked_client")', source)
+        self.assertIn("UserRole.agent, UserRole.director", source)
+        self.assertNotIn('text.startswith("/start")', source)
         self.assertIn("event.message or event.callback_query", source)
         self.assertIn('callback_data.startswith("pay_invoice_method:")', source)
 

@@ -13,7 +13,7 @@ from locales.uz import t
 
 class SubscriptionMiddleware(BaseMiddleware):
     """
-    Blocks company users when the company subscription is due.
+    Blocks agent/director actions when the company subscription is due.
     Payment flow callbacks and proof uploads must still pass through.
     Must run after AuthMiddleware.
     """
@@ -88,7 +88,7 @@ class SubscriptionMiddleware(BaseMiddleware):
         if user.role == UserRole.developer:
             return await handler(event, data)
 
-        if user.role not in (UserRole.client, UserRole.agent, UserRole.director):
+        if user.role not in (UserRole.agent, UserRole.director):
             return await handler(event, data)
 
         if await self._is_payment_flow_event(event, data, user):
