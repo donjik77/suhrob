@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - media_data:/var/suhrob_bot/media
+    networks:
+      - suhrob_net
+    command: >
+      sh -c "alembic upgrade head && python -m src.main"
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: suhrob_bot
+      POSTGRES_USER: suhrob
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U suhrob -d suhrob_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - suhrob_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - suhrob_net
+
+volumes:
+  pg_data:
+  media_data:
+
+networks:
+  suhrob_net:
+    driver: bridge

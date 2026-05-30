@@ -1,0 +1,352 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1780143777619,
+  "projectRoot": "c:\\suhrob",
+  "techStack": {
+    "languages": [],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "suhrob_bot": {
+      "path": "suhrob_bot",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1780143777580,
+      "keyFiles": [
+        "alembic.ini",
+        "docker-compose.yml",
+        "Dockerfile",
+        "railway.toml",
+        "README.md"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "suhrob_bot",
+      "accessCount": 30,
+      "lastAccessed": 1780053379096,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\src",
+      "accessCount": 29,
+      "lastAccessed": 1778589239028,
+      "type": "directory"
+    },
+    {
+      "path": "",
+      "accessCount": 15,
+      "lastAccessed": 1780052588011,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\agent\\stats.py",
+      "accessCount": 13,
+      "lastAccessed": 1778583810126,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\agent\\my_properties.py",
+      "accessCount": 13,
+      "lastAccessed": 1778659833852,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\services\\publisher_service.py",
+      "accessCount": 13,
+      "lastAccessed": 1778660207489,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\director\\dashboard.py",
+      "accessCount": 11,
+      "lastAccessed": 1778583527777,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\services\\ai_service.py",
+      "accessCount": 10,
+      "lastAccessed": 1778587975963,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\db\\models.py",
+      "accessCount": 9,
+      "lastAccessed": 1778583531613,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\client\\ai_consultation.py",
+      "accessCount": 9,
+      "lastAccessed": 1778591140140,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\agent\\add_property.py",
+      "accessCount": 9,
+      "lastAccessed": 1778659834055,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\middlewares\\auth.py",
+      "accessCount": 9,
+      "lastAccessed": 1780052136953,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\common.py",
+      "accessCount": 9,
+      "lastAccessed": 1780052183271,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\main.py",
+      "accessCount": 9,
+      "lastAccessed": 1780053408543,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\requirements.txt",
+      "accessCount": 8,
+      "lastAccessed": 1778579826280,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\agent\\my_clients.py",
+      "accessCount": 7,
+      "lastAccessed": 1778253533818,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\keyboards\\client.py",
+      "accessCount": 7,
+      "lastAccessed": 1778579135109,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\director\\agents.py",
+      "accessCount": 6,
+      "lastAccessed": 1778253942721,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\manager.py",
+      "accessCount": 6,
+      "lastAccessed": 1780052059418,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\services\\notification_service.py",
+      "accessCount": 5,
+      "lastAccessed": 1778581267630,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\db\\repositories\\settings_repo.py",
+      "accessCount": 4,
+      "lastAccessed": 1778253159644,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\developer\\companies.py",
+      "accessCount": 4,
+      "lastAccessed": 1778253513230,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\director\\properties.py",
+      "accessCount": 4,
+      "lastAccessed": 1778253946025,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\templates\\channel_welcome.py",
+      "accessCount": 4,
+      "lastAccessed": 1778579058502,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\services\\ai_prompts.py",
+      "accessCount": 4,
+      "lastAccessed": 1778591140657,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\config.py",
+      "accessCount": 4,
+      "lastAccessed": 1780053386797,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\services\\search_service.py",
+      "accessCount": 3,
+      "lastAccessed": 1778253939741,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\client\\search.py",
+      "accessCount": 3,
+      "lastAccessed": 1778253939931,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers",
+      "accessCount": 3,
+      "lastAccessed": 1778587895087,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\scripts\\setup_data.py",
+      "accessCount": 3,
+      "lastAccessed": 1778588634291,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\client\\start.py",
+      "accessCount": 3,
+      "lastAccessed": 1780052159906,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\client\\favorites.py",
+      "accessCount": 2,
+      "lastAccessed": 1778253800938,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\keyboards\\agent.py",
+      "accessCount": 2,
+      "lastAccessed": 1778579018346,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\keyboards\\styles.py",
+      "accessCount": 2,
+      "lastAccessed": 1778581246573,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\states\\add_property.py",
+      "accessCount": 2,
+      "lastAccessed": 1778588576373,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\scheduler\\jobs.py",
+      "accessCount": 2,
+      "lastAccessed": 1780052567940,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\director\\balance.py",
+      "accessCount": 1,
+      "lastAccessed": 1778253052712,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\filters\\role.py",
+      "accessCount": 1,
+      "lastAccessed": 1778253052763,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\scheduler\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1778253078044,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\scheduler",
+      "accessCount": 1,
+      "lastAccessed": 1778253087456,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\developer",
+      "accessCount": 1,
+      "lastAccessed": 1778253331955,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\client",
+      "accessCount": 1,
+      "lastAccessed": 1778253716099,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\middlewares",
+      "accessCount": 1,
+      "lastAccessed": 1778253766336,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\alembic\\versions\\0001_create_tables.py",
+      "accessCount": 1,
+      "lastAccessed": 1778578220494,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\alembic\\versions\\0010_add_new_client_notification_type.py",
+      "accessCount": 1,
+      "lastAccessed": 1778578686703,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\alembic",
+      "accessCount": 1,
+      "lastAccessed": 1778581267717,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\locales\\uz.py",
+      "accessCount": 1,
+      "lastAccessed": 1778583581452,
+      "type": "directory"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\director\\company_scope.py",
+      "accessCount": 1,
+      "lastAccessed": 1778583612653,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\client\\channel_join.py",
+      "accessCount": 1,
+      "lastAccessed": 1778583659084,
+      "type": "file"
+    },
+    {
+      "path": "suhrob_bot\\src\\bot\\handlers\\agent",
+      "accessCount": 1,
+      "lastAccessed": 1778659830425,
+      "type": "directory"
+    }
+  ],
+  "userDirectives": []
+}
