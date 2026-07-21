@@ -130,20 +130,20 @@ async def instagram_webhook(request):
         data = await request.json()
         user_id = data.get("user_id")
         user_message = data.get("message", "")
+        
+        logging.info(f"Получено сообщение от Instagram: {user_message} (ID: {user_id})")
 
         # -------------------------------------------------------------
         # ТУТ ПОЗЖЕ БУДЕТ ВЫЗЫВАТЬСЯ ТВОЙ AI ДВИЖОК
         # Пока возвращаем тестовый ответ для проверки связи в Инстаграме
         # -------------------------------------------------------------
         ai_response_text = f"Salom jigar! Tizim ishlayapti. Siz yozdingiz: {user_message}"
+        
+        logging.info(f"Отправляем ответ в Manychat: {ai_response_text}")
 
+        # Возвращаем максимально простой JSON для сохранения в переменную Manychat:
         return web.json_response({
-            "version": "v2",
-            "content": {
-                "messages": [
-                    {"type": "text", "text": ai_response_text}
-                ]
-            }
+            "answer": ai_response_text
         })
     except Exception as exc:
         logging.error("Instagram webhook error: %s", exc)
