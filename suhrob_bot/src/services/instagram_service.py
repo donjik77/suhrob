@@ -7,7 +7,6 @@ from src.db.session import AsyncSessionFactory
 from src.db.models import (
     User,
     ClientConversation,
-    ClientProfile,
 )
 
 
@@ -66,7 +65,6 @@ async def get_history(
 
     messages = result.scalars().all()
 
-
     messages.reverse()
 
 
@@ -75,10 +73,12 @@ async def get_history(
 
     for msg in messages:
 
-        history.append({
-            "role": msg.role,
-            "content": msg.message
-        })
+        history.append(
+            {
+                "role": msg.role,
+                "content": msg.message
+            }
+        )
 
 
     return history
@@ -98,6 +98,7 @@ async def save_message(
         message=text,
     )
 
+
     session.add(msg)
 
     await session.commit()
@@ -115,7 +116,7 @@ async def process_instagram_message(
         async with AsyncSessionFactory() as session:
 
 
-            # создаём клиента Instagram
+            # Получаем или создаём Instagram клиента
             user = await get_or_create_instagram_user(
                 session,
                 user_id,
@@ -123,33 +124,20 @@ async def process_instagram_message(
             )
 
 
-            # берём историю
+            # Получаем историю сообщений
             history = await get_history(
                 session,
                 user.id
             )
 
 
-            # профиль клиента
+            # Пока профиль пустой
+            # Добавим позже через отдельный запрос
             profile = {}
 
 
-            if user.client_profile:
 
-                profile = {
-                    "budget_max_usd":
-                        user.client_profile.budget_max_usd,
-
-                    "preferred_districts":
-                        user.client_profile.preferred_districts,
-
-                    "preferred_rooms":
-                        user.client_profile.preferred_rooms,
-                }
-
-
-
-            # сохраняем вопрос
+            # сохраняем сообщение клиента
             await save_message(
                 session,
                 user.id,
@@ -159,6 +147,7 @@ async def process_instagram_message(
 
 
 
+            # отправляем в AI
             answer = await chat_with_client(
                 user_message=message,
                 conversation_history=history,
@@ -170,7 +159,7 @@ async def process_instagram_message(
 
 
 
-            # сохраняем ответ
+            # сохраняем ответ AI
             await save_message(
                 session,
                 user.id,
@@ -188,6 +177,7 @@ async def process_instagram_message(
         logging.exception(
             "Instagram AI error"
         )
+
 
         return (
             "Xatolik yuz berdi. "
