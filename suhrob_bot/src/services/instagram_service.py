@@ -1,7 +1,7 @@
 import logging
 
 from src.services.ai_service import chat_with_client
-from src.db.session import async_session_maker
+from src.db.session import AsyncSessionFactory
 
 
 async def process_instagram_message(
@@ -11,13 +11,11 @@ async def process_instagram_message(
 ):
 
     try:
-
         logging.info(
             f"Instagram AI start user={user_id}"
         )
 
-
-        async with async_session_maker() as session:
+        async with AsyncSessionFactory() as session:
 
             answer = await chat_with_client(
                 user_message=message,
@@ -28,6 +26,9 @@ async def process_instagram_message(
                 property_id=None,
             )
 
+        logging.info(
+            f"Instagram AI answer generated"
+        )
 
         return answer
 
@@ -38,4 +39,4 @@ async def process_instagram_message(
             "Instagram AI error"
         )
 
-        return "Ошибка AI"
+        return "Произошла ошибка. Попробуйте ещё раз."
