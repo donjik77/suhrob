@@ -343,6 +343,7 @@ def extract_rooms(message: str, history: list) -> int | None:
 
 
 async def build_properties_context(
+ async def build_properties_context(
     company_id: int,
     district: str | None,
     price_max: float | None,
@@ -353,7 +354,10 @@ async def build_properties_context(
     from sqlalchemy import select
     from src.db.models import Property, PropertyStatus
 
+
+    # конкретная карточка
     if property_id:
+
         selected = (
             await session.execute(
                 select(Property).where(
@@ -363,45 +367,88 @@ async def build_properties_context(
                 )
             )
         ).scalar_one_or_none()
+
+
         if selected:
-            return (
-                "Tanlangan obyekt konteksti:\n"
-                f"CARD_ID:{selected.id} | {selected.title} | {selected.property_type.value} | "
-                f"{selected.location_district} | {selected.location_address or ''} | "
-                f"{selected.rooms} xona | {selected.floor}/{selected.total_floors} qavat | "
-                f"{selected.area_sqm} m² | ${selected.price_usd:,.0f} | "
-                f"{selected.description or ''}\n\n"
-                "Mijoz aynan shu obyekt haqida so'rayapti. "
-                "Faqat shu ma'lumotlarga tayaning; yetishmaydigan ma'lumot uchun agentga ulashni taklif qiling."
+
+            text = (
+                selected.custom_text
+                or selected.description
+                or selected.title
+                or ""
             )
 
+
+            return (
+                "Tanlangan obyekt konteksti:\n\n"
+                f"CARD_ID:{selected.id}\n"
+                f"{text}\n\n"
+                "Mijoz aynan shu obyekt haqida so'rayapti. "
+                "Tayyor tavsifdan foydalanib javob bering."
+            )
+
+
+    # поиск вариантов
     q = select(Property).where(
         Property.company_id == company_id,
         Property.status == PropertyStatus.active,
     )
-    if district:
-        q = q.where(Property.location_district.ilike(f"%{district}%"))
-    if price_max:
-        q = q.where(Property.price_usd <= price_max)
-    if rooms:
-        q = q.where(Property.rooms == rooms)
 
-    result = await session.execute(q.limit(5))
+
+    if district:
+        q = q.where(
+            Property.location_district.ilike(f"%{district}%")
+        )
+
+
+    if price_max:
+        q = q.where(
+            Property.price_usd <= price_max
+        )
+
+
+    if rooms:
+        q = q.where(
+            Property.rooms == rooms
+        )
+
+
+    result = await session.execute(
+        q.limit(5)
+    )
+
+
     props = list(result.scalars())
+
 
     if not props:
         return "Hozircha bu parametrlarda mos uy yo'q."
 
+
     lines = []
+
+
     for p in props:
-        lines.append(
-            f"CARD_ID:{p.id} | {p.property_type.value} | {p.location_district} | "
-            f"{p.location_address or ''} | "
-            f"{p.rooms} xona | {p.floor}/{p.total_floors} qavat | "
-            f"{p.area_sqm} m² | ${p.price_usd:,.0f} | "
-            f"{p.description[:120] if p.description else ''}"
+
+        text = (
+            p.custom_text
+            or p.description
+            or p.title
+            or ""
         )
-    return "\n".join(lines)
+
+
+        lines.append(
+            f"CARD_ID:{p.id}\n"
+            f"{text[:700]}"
+        )
+
+
+    return (
+        "Topilgan obyektlar:\n\n"
+        +
+        "\n\n---\n\n".join(lines)
+    )
 
 
 async def format_client_profile(profile: dict) -> str:
@@ -409,7 +456,7 @@ async def format_client_profile(profile: dict) -> str:
         return "Yangi mijoz, ma'lumot yo'q."
     parts = []
     if profile.get("budget_min_usd"):
-        parts.append(f"Byudjet: ${profile['budget_min_usd']:,}–${profile.get('budget_max_usd', '?')}")
+        parts.append(f"Byudjet: ${profile['budget_min_usd']:,}–${profile.get('budget_max_usd') or '?'}")
     if profile.get("preferred_districts"):
         parts.append(f"Tuman: {', '.join(profile['preferred_districts'])}")
     if profile.get("preferred_rooms"):
