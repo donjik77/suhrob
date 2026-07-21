@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
+from aiohttp import web  # <-- ДОБАВЛЕН ИМПОРТ ДЛЯ ВЕБ-СЕРВЕРА
 
 from src.config import settings
 from src.bot.manager import BotManager
@@ -121,6 +122,48 @@ def register_routers(dp: Dispatcher) -> None:
     dp.include_router(dev_companies_router)
 
 
+# =====================================================================
+# НОВЫЙ БЛОК: HTTP-СЕРВЕР ДЛЯ INSTAGRAM (MANYCHAT)
+# =====================================================================
+async def instagram_webhook(request):
+    try:
+        data = await request.json()
+        user_id = data.get("user_id")
+        user_message = data.get("message", "")
+
+        # -------------------------------------------------------------
+        # ТУТ ПОЗЖЕ БУДЕТ ВЫЗЫВАТЬСЯ ТВОЙ AI ДВИЖОК
+        # Пока возвращаем тестовый ответ для проверки связи в Инстаграме
+        # -------------------------------------------------------------
+        ai_response_text = f"Salom jigar! Tizim ishlayapti. Siz yozdingiz: {user_message}"
+
+        return web.json_response({
+            "version": "v2",
+            "content": {
+                "messages": [
+                    {"type": "text", "text": ai_response_text}
+                ]
+            }
+        })
+    except Exception as exc:
+        logging.error("Instagram webhook error: %s", exc)
+        return web.json_response({"error": str(exc)}, status=500)
+
+
+async def start_webhook_server():
+    app = web.Application()
+    app.router.add_post("/webhook/instagram", instagram_webhook)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info("✅ Webhook-сервер для Instagram запущен на порту %s", port)
+# =====================================================================
+
+
 async def main():
     setup_logging()
     logger = structlog.get_logger()
@@ -147,10 +190,12 @@ async def main():
     dev_bot_token = None
     try:
         from src.config import settings as s
-        import os
         dev_bot_token = os.environ.get("BOT_TOKEN") or None
     except Exception:
         pass
+
+    # 🚀 ЗАПУСКАЕМ ВЕБ-СЕРВЕР ДЛЯ ИНСТАГРАМА ПЕРЕД ТЕЛЕГРАМ-БОТАМИ:
+    await start_webhook_server()
 
     # Start all company bots from DB
     await bot_manager.start_all()
