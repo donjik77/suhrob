@@ -343,7 +343,6 @@ def extract_rooms(message: str, history: list) -> int | None:
 
 
 async def build_properties_context(
- async def build_properties_context(
     company_id: int,
     district: str | None,
     price_max: float | None,
@@ -351,9 +350,9 @@ async def build_properties_context(
     session,
     property_id: int | None = None,
 ) -> str:
+
     from sqlalchemy import select
     from src.db.models import Property, PropertyStatus
-
 
     # конкретная карточка
     if property_id:
@@ -368,7 +367,6 @@ async def build_properties_context(
             )
         ).scalar_one_or_none()
 
-
         if selected:
 
             text = (
@@ -377,7 +375,6 @@ async def build_properties_context(
                 or selected.title
                 or ""
             )
-
 
             return (
                 "Tanlangan obyekt konteksti:\n\n"
@@ -394,18 +391,15 @@ async def build_properties_context(
         Property.status == PropertyStatus.active,
     )
 
-
     if district:
         q = q.where(
             Property.location_district.ilike(f"%{district}%")
         )
 
-
     if price_max:
         q = q.where(
             Property.price_usd <= price_max
         )
-
 
     if rooms:
         q = q.where(
@@ -417,7 +411,6 @@ async def build_properties_context(
         q.limit(5)
     )
 
-
     props = list(result.scalars())
 
 
@@ -427,7 +420,6 @@ async def build_properties_context(
 
     lines = []
 
-
     for p in props:
 
         text = (
@@ -436,7 +428,6 @@ async def build_properties_context(
             or p.title
             or ""
         )
-
 
         lines.append(
             f"CARD_ID:{p.id}\n"
@@ -450,8 +441,8 @@ async def build_properties_context(
         "\n\n---\n\n".join(lines)
     )
 
-
 async def format_client_profile(profile: dict) -> str:
+
     if not profile:
         return "Yangi mijoz, ma'lumot yo'q."
     parts = []
