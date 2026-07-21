@@ -121,46 +121,99 @@ def register_routers(dp: Dispatcher) -> None:
     dp.include_router(dev_settings_router)
     dp.include_router(dev_companies_router)
 
+# =====================================================================
+# HTTP-СЕРВЕР ДЛЯ INSTAGRAM (MANYCHAT)
+# =====================================================================
 
-# =====================================================================
-# НОВЫЙ БЛОК: HTTP-СЕРВЕР ДЛЯ INSTAGRAM (MANYCHAT)
-# =====================================================================
 async def instagram_webhook(request):
     try:
         data = await request.json()
+
         user_id = data.get("user_id")
         user_message = data.get("message", "")
-        
-        logging.info(f"Получено сообщение от Instagram: {user_message} (ID: {user_id})")
 
-        # -------------------------------------------------------------
-        # ТУТ ПОЗЖЕ БУДЕТ ВЫЗЫВАТЬСЯ ТВОЙ AI ДВИЖОК
-        # Пока возвращаем тестовый ответ для проверки связи в Инстаграме
-        # -------------------------------------------------------------
-        ai_response_text = f"Salom jigar! Tizim ishlayapti. Siz yozdingiz: {user_message}"
-        
-        logging.info(f"Отправляем ответ в Manychat: {ai_response_text}")
+        logging.info(
+            f"📩 Instagram message: {user_message} | user_id={user_id}"
+        )
 
-        # Возвращаем максимально простой JSON для сохранения в переменную Manychat:
+
+        if not user_message:
+            return web.json_response({
+                "answer": "Напишите ваш вопрос."
+            })
+
+
+        from src.services.instagram_service import process_instagram_message
+
+
+        ai_response_text = await process_instagram_message(
+            message=user_message,
+            user_id=int(user_id),
+            company_id=1
+        )
+
+
+        logging.info(
+            f"🤖 AI response: {ai_response_text}"
+        )
+
+
         return web.json_response({
             "answer": ai_response_text
         })
+
+
     except Exception as exc:
-        logging.error("Instagram webhook error: %s", exc)
-        return web.json_response({"error": str(exc)}, status=500)
+        logging.exception(
+            "Instagram webhook error"
+        )
+
+        return web.json_response(
+            {
+                "error": str(exc)
+            },
+            status=500
+        )
+
 
 
 async def start_webhook_server():
+
     app = web.Application()
-    app.router.add_post("/webhook/instagram", instagram_webhook)
+
+    app.router.add_post(
+        "/webhook/instagram",
+        instagram_webhook
+    )
+
 
     runner = web.AppRunner(app)
+
     await runner.setup()
-    
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            8080
+        )
+    )
+
+
+    site = web.TCPSite(
+        runner,
+        "0.0.0.0",
+        port
+    )
+
     await site.start()
-    logging.info("✅ Webhook-сервер для Instagram запущен на порту %s", port)
+
+
+    logging.info(
+        "✅ Instagram webhook running on port %s",
+        port
+    )
+
 # =====================================================================
 
 
