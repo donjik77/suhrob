@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import User, UserRole, Company
 from src.bot.keyboards.client import main_menu_kb, property_card_kb
 from src.bot.keyboards.agent import agent_menu_kb
-from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.bot.handlers.client.property_access import get_active_property_for_client, resolve_client_company_id
 from src.bot.utils.property_media import answer_property_media_card
 from src.utils.formatters import format_property_card
 from locales.uz import t
@@ -40,7 +40,7 @@ async def check_channel_subscription(callback: CallbackQuery, db_user: User, sta
 
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, db_user: User, command: CommandObject, db_session: AsyncSession, company: Company, state: FSMContext):
+async def cmd_start(message: Message, db_user: User, command: CommandObject, db_session: AsyncSession, company: Company | None, state: FSMContext):
     name = message.from_user.full_name or message.from_user.username or "Foydalanuvchi"
 
     # Handle deep-link: /start property_123
@@ -77,7 +77,8 @@ async def _show_property_deeplink(
 ) -> None:
     from src.db.repositories.settings_repo import SettingsRepository
 
-    prop = await get_active_property_for_client(property_id, company, session, with_media=True, with_agent=True)
+    company_id = resolve_client_company_id(company, db_user)
+    prop = await get_active_property_for_client(property_id, company_id, session, with_media=True, with_agent=True)
 
     if not prop:
         await message.answer(t("welcome", name=message.from_user.full_name or "Foydalanuvchi"), reply_markup=main_menu_kb(), parse_mode="HTML")

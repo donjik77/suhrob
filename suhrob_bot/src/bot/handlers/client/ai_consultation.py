@@ -17,7 +17,7 @@ from src.db.models import (
     PropertyStatus, LeadAssignment, LeadStatus,
 )
 from src.db.session import AsyncSessionFactory
-from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.bot.handlers.client.property_access import get_active_property_for_client, resolve_client_company_id
 from src.bot.keyboards.client import property_card_kb, request_client_phone_kb
 from src.bot.handlers.client.favorites import _extract_phone
 from src.bot.utils.property_media import answer_property_media_card
@@ -140,11 +140,12 @@ async def start_consultation(message: Message, db_user: User, state: FSMContext)
 
 
 @router.callback_query(F.data.startswith("ai_consult:"))
-async def start_consultation_property(callback: CallbackQuery, db_user: User, company: Company, state: FSMContext):
+async def start_consultation_property(callback: CallbackQuery, db_user: User, company: Company | None, state: FSMContext):
     property_id = int(callback.data.split(":")[1])
+    company_id = resolve_client_company_id(company, db_user)
 
     async with AsyncSessionFactory() as session:
-        prop = await get_active_property_for_client(property_id, company, session)
+        prop = await get_active_property_for_client(property_id, company_id, session)
     if not prop:
         await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
         return

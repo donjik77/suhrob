@@ -10,6 +10,7 @@ from src.db.models import User, UserRole, PropertyType, Company, Property, Clien
 from src.db.session import AsyncSessionFactory
 from src.db.repositories.property_repo import PropertyRepository
 from src.db.repositories.settings_repo import SettingsRepository
+from src.bot.handlers.client.property_access import resolve_client_company_id
 from src.bot.states.search import SearchStates
 from src.bot.keyboards.client import (
     search_type_kb, search_district_kb, search_rooms_kb,
@@ -25,24 +26,25 @@ router = Router()
 
 
 @router.message(F.text == "🔍 Uy qidirish")
-async def start_search(message: Message, state: FSMContext, db_user: User, company: Company):
-    if company is None:
+async def start_search(message: Message, state: FSMContext, db_user: User, company: Company | None):
+    company_id = resolve_client_company_id(company, db_user)
+    if company_id is None:
         await message.answer("Kompaniya topilmadi.")
         return
     await state.clear()
-    await state.update_data(company_id=company.id)
+    await state.update_data(company_id=company_id)
     await state.set_state(SearchStates.choosing_type)
     await message.answer(t("search_type"), reply_markup=search_type_kb())
 
 
 @router.callback_query(F.data.startswith("search_type:"), SearchStates.choosing_type)
-async def choose_type(callback: CallbackQuery, state: FSMContext, company: Company):
+async def choose_type(callback: CallbackQuery, state: FSMContext, db_user: User, company: Company | None):
     ptype = callback.data.split(":")[1]
     await state.update_data(property_type=ptype)
     await state.set_state(SearchStates.choosing_district)
 
     data = await state.get_data()
-    company_id = data.get("company_id") or (company.id if company else None)
+    company_id = data.get("company_id") or resolve_client_company_id(company, db_user)
     if company_id is None:
         await callback.answer("Kompaniya topilmadi.", show_alert=True)
         return
@@ -211,15 +213,16 @@ async def _do_search(message_or_obj, state: FSMContext, edit: bool = False):
 
 # Back navigation handlers
 @router.callback_query(F.data.startswith("search_back:"))
-async def search_back(callback: CallbackQuery, state: FSMContext, company: Company):
+async def search_back(callback: CallbackQuery, state: FSMContext, db_user: User, company: Company | None):
     target = callback.data.split(":")[1]
 
     if target == "start":
         await state.clear()
-        if company is None:
+        company_id = resolve_client_company_id(company, db_user)
+        if company_id is None:
             await callback.answer("Kompaniya topilmadi.", show_alert=True)
             return
-        await state.update_data(company_id=company.id)
+        await state.update_data(company_id=company_id)
         await callback.message.edit_text(t("search_type"), reply_markup=search_type_kb())
         await state.set_state(SearchStates.choosing_type)
     elif target == "type":
@@ -228,7 +231,7 @@ async def search_back(callback: CallbackQuery, state: FSMContext, company: Compa
     elif target == "district":
         await state.set_state(SearchStates.choosing_district)
         back_data = await state.get_data()
-        back_company_id = back_data.get("company_id") or (company.id if company else None)
+        back_company_id = back_data.get("company_id") or resolve_client_company_id(company, db_user)
         if back_company_id is None:
             await callback.answer("Kompaniya topilmadi.", show_alert=True)
             return
@@ -253,12 +256,13 @@ async def search_back(callback: CallbackQuery, state: FSMContext, company: Compa
 
 
 @router.callback_query(F.data == "search_new")
-async def new_search(callback: CallbackQuery, state: FSMContext, company: Company):
+async def new_search(callback: CallbackQuery, state: FSMContext, db_user: User, company: Company | None):
     await state.clear()
-    if company is None:
+    company_id = resolve_client_company_id(company, db_user)
+    if company_id is None:
         await callback.answer("Kompaniya topilmadi.", show_alert=True)
         return
-    await state.update_data(company_id=company.id)
+    await state.update_data(company_id=company_id)
     await state.set_state(SearchStates.choosing_type)
     await callback.message.answer(t("search_type"), reply_markup=search_type_kb())
 

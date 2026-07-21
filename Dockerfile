@@ -14,4 +14,6 @@ COPY . .
 
 RUN mkdir -p /var/suhrob_bot/media
 
+WORKDIR /app/suhrob_bot
+
 CMD ["python", "-m", "src.main"]

@@ -4,8 +4,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from src.db.models import Company
-from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.db.models import Company, User
+from src.bot.handlers.client.property_access import get_active_property_for_client, resolve_client_company_id
 
 router = Router()
 
@@ -50,11 +50,12 @@ def _term_kb(property_id: int, dp: int) -> InlineKeyboardMarkup:
 
 
 @router.callback_query(F.data.startswith("mortgage:"))
-async def show_down_payment(callback: CallbackQuery, company: Company):
+async def show_down_payment(callback: CallbackQuery, db_user: User, company: Company | None):
     property_id = int(callback.data.split(":")[1])
+    company_id = resolve_client_company_id(company, db_user)
     from src.db.session import AsyncSessionFactory
     async with AsyncSessionFactory() as session:
-        prop = await get_active_property_for_client(property_id, company, session)
+        prop = await get_active_property_for_client(property_id, company_id, session)
     if not prop:
         await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
         return
@@ -104,16 +105,17 @@ async def select_down_payment(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("mort_term:"))
-async def show_calculation(callback: CallbackQuery, company: Company):
+async def show_calculation(callback: CallbackQuery, db_user: User, company: Company | None):
     parts = callback.data.split(":")
     property_id = int(parts[1])
     dp_pct = int(parts[2])
     years = int(parts[3])
 
     # Fetch property price
+    company_id = resolve_client_company_id(company, db_user)
     from src.db.session import AsyncSessionFactory
     async with AsyncSessionFactory() as session:
-        prop = await get_active_property_for_client(property_id, company, session)
+        prop = await get_active_property_for_client(property_id, company_id, session)
 
     if not prop:
         await callback.answer("❌ Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)

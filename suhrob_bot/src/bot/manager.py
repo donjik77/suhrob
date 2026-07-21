@@ -61,15 +61,24 @@ class BotManager:
         asyncio.create_task(self._start_polling(bot))
         logger.info("bot_added", company_id=company_id, bot_username=bot_info.username)
 
-        if bot_info.username:
+        if bot_info.id or bot_info.username:
             from sqlalchemy import update
             async with AsyncSessionFactory() as session:
-                await session.execute(
-                    update(Company)
-                    .where(Company.id == company_id)
-                    .values(bot_username=bot_info.username)
-                )
-                await session.commit()
+                try:
+                    await session.execute(
+                        update(Company)
+                        .where(Company.id == company_id)
+                        .values(bot_id=bot_info.id, bot_username=bot_info.username)
+                    )
+                    await session.commit()
+                except Exception as exc:
+                    await session.rollback()
+                    logger.warning(
+                        "bot_metadata_update_failed",
+                        company_id=company_id,
+                        bot_id=bot_info.id,
+                        error=str(exc),
+                    )
 
     async def remove_bot(self, company_id: int) -> None:
         bot = self._bots.pop(company_id, None)
@@ -102,6 +111,9 @@ class BotManager:
 
     def get_company_id(self, bot_id: int) -> Optional[int]:
         return self._bot_to_company.get(bot_id)
+
+    def remember_company_bot(self, bot_id: int, company_id: int) -> None:
+        self._bot_to_company[bot_id] = company_id
 
     def running_count(self) -> int:
         return len(self._bots)

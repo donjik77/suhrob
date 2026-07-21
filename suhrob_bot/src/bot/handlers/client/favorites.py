@@ -8,7 +8,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import selectinload
 
 from locales.uz import t
-from src.bot.handlers.client.property_access import get_active_property_for_client
+from src.bot.handlers.client.property_access import get_active_property_for_client, resolve_client_company_id
 from src.bot.keyboards.client import favorites_kb, main_menu_kb, request_client_phone_kb
 from src.bot.utils.property_media import answer_property_media_card
 from src.db.models import (
@@ -55,10 +55,11 @@ async def _connect_client_to_agent(
     property_id: int,
     client_phone: str | None = None,
 ) -> bool:
+    company_id = resolve_client_company_id(company, db_user)
     async with AsyncSessionFactory() as session:
         prop = await get_active_property_for_client(
             property_id,
-            company,
+            company_id,
             session,
             with_agent=True,
         )
@@ -128,7 +129,8 @@ async def _connect_client_to_agent(
 
 @router.message(F.text == t("btn_favorites"))
 async def show_favorites(message: Message, db_user: User, company: Company | None):
-    if company is None:
+    company_id = resolve_client_company_id(company, db_user)
+    if company_id is None:
         await message.answer("Kompaniya topilmadi.", reply_markup=main_menu_kb())
         return
 
@@ -138,7 +140,7 @@ async def show_favorites(message: Message, db_user: User, company: Company | Non
             .where(ClientFavorite.user_id == db_user.id)
             .join(Property, ClientFavorite.property_id == Property.id)
             .where(
-                Property.company_id == company.id,
+                Property.company_id == company_id,
                 Property.status == PropertyStatus.active,
             )
             .options(
@@ -164,7 +166,7 @@ async def show_favorites(message: Message, db_user: User, company: Company | Non
                 continue
             await session.execute(
                 update(Property)
-                .where(Property.id == prop.id, Property.company_id == company.id)
+                .where(Property.id == prop.id, Property.company_id == company_id)
                 .values(views_count=Property.views_count + 1)
             )
             await answer_property_media_card(
@@ -181,9 +183,10 @@ async def show_favorites(message: Message, db_user: User, company: Company | Non
 @router.callback_query(F.data.startswith("prop_fav:"))
 async def add_to_favorites(callback: CallbackQuery, db_user: User, company: Company | None):
     property_id = int(callback.data.split(":")[1])
+    company_id = resolve_client_company_id(company, db_user)
 
     async with AsyncSessionFactory() as session:
-        prop = await get_active_property_for_client(property_id, company, session)
+        prop = await get_active_property_for_client(property_id, company_id, session)
         if not prop:
             await callback.answer("Bunday obyekt mavjud emas yoki sotilgan", show_alert=True)
             return

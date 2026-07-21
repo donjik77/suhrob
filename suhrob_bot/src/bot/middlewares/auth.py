@@ -54,12 +54,12 @@ class AuthMiddleware(BaseMiddleware):
         if len(employees) == 1:
             return employees[0]
 
+        if len(scoped_users) == 1:
+            return scoped_users[0]
+
         global_user = await repo.get_by_telegram_id(telegram_id, company_id=None)
         if global_user:
             return global_user
-
-        if len(scoped_users) == 1:
-            return scoped_users[0]
 
         return None
 
@@ -195,6 +195,11 @@ class AuthMiddleware(BaseMiddleware):
                     )
                     await session.commit()
                     await session.refresh(user)
+
+            if company is None and user.company_id is not None:
+                company = await session.get(Company, user.company_id)
+                if company and company.is_active:
+                    data["company"] = company
 
             # Blocked users cannot use the bot (developer is never blocked)
             if user.is_blocked and user.role != UserRole.developer:
