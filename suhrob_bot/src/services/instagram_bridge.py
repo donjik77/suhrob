@@ -53,6 +53,12 @@ INSTAGRAM_COMPANY_ID = getattr(settings, "INSTAGRAM_COMPANY_ID", None)
 _CARD_MARKER_RE = re.compile(r"\[CARD\s*:\s*(\d+)\]", re.IGNORECASE)
 _VISIBLE_PROPERTY_ID_RE = re.compile(r"(?:CARD_)?(?:#\s*)?ID[_:\-\s]*(\d+)", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_PHONE_RE = re.compile(r"^\+?\d[\d\s().\-]{6,}$")
+_AGENT_CONNECT_RE = re.compile(
+    r"(agent|makler|rieltor|bog'?la|boglan|bog'lan|aloqa|telefon|ko'rish|korish|uchrash)",
+    re.IGNORECASE,
+)
+QUALIFY_SCORE_THRESHOLD = 70
 
 
 def extract_property_card_ids(reply: str) -> list[int]:
@@ -91,8 +97,8 @@ def strip_html(text: str) -> str:
 # ------------------------------------------------------------------ #
 
 def mc_response(messages: list[dict], actions: list | None = None,
-                quick_replies: list | None = None) -> dict:
-    return {
+                quick_replies: list | None = None, keep_listening: bool = True) -> dict:
+    response = {
         "version": "v2",
         "content": {
             "type": "instagram",
@@ -101,6 +107,20 @@ def mc_response(messages: list[dict], actions: list | None = None,
             "quick_replies": (quick_replies or [])[:11],
         },
     }
+
+    if keep_listening and PUBLIC_BASE_URL:
+        response["content"]["external_message_callback"] = {
+            "url": f"{PUBLIC_BASE_URL}/webhook/instagram",
+            "method": "post",
+            "headers": {},
+            "payload": {
+                "user_id": "{{user_id}}",
+                "message": "{{last_input_text}}",
+            },
+            "timeout": 86400,
+        }
+
+    return response
 
 
 def mc_text(text: str) -> dict:
@@ -306,13 +326,18 @@ async def instagram_webhook(request: web.Request) -> web.Response:
     """
     POST /webhook/instagram
 
-    Тело запроса из ManyChat:
+    Тело запроса из ManyChat (вкладка Body) — ТОЛЬКО для самого первого
+    сообщения, которое ManyChat присылает через ручной Dynamic block во фло:
     {
       "user_id": "{{Contact Id}}",
       "message": "{{Last Text Input}}",
       "first_name": "{{First Name}}",
       "gender": "{{Gender}}"
     }
+
+    Все СЛЕДУЮЩИЕ сообщения этого контакта прилетают сюда же, но уже через
+    external_message_callback (см. mc_response) — в его payload доступны
+    только user_id и message, gender там не передаётся.
     """
     try:
         data = await request.json()
@@ -334,6 +359,10 @@ async def instagram_webhook(request: web.Request) -> web.Response:
     async with AsyncSessionFactory() as session:
         user = await get_or_create_ig_user(session, contact_id, first_name)
         company_id = user.company_id
+
+        if not user.phone and _PHONE_RE.match(user_message):
+            reply = await _handle_phone_submission(session, user, user_message)
+            return web.json_response(reply)
 
         history_rows = (
             await session.execute(
@@ -404,6 +433,7 @@ async def instagram_webhook(request: web.Request) -> web.Response:
         ))
         await session.commit()
 
+        should_ask_phone = False
         try:
             all_history = history + [
                 {"role": "user", "content": user_message},
@@ -411,11 +441,70 @@ async def instagram_webhook(request: web.Request) -> web.Response:
             ]
             qualification = await ai_service.qualify_client(all_history)
             await _upsert_profile(session, user.id, qualification)
+
+            should_ask_phone = (
+                not user.phone
+                and (
+                    qualification.get("qualification_score", 0) >= QUALIFY_SCORE_THRESHOLD
+                    or _AGENT_CONNECT_RE.search(user_message)
+                )
+            )
         except Exception as exc:
             logger.warning("ig_qualify_failed", error=str(exc))
 
-    logger.info("ig_message_out", contact=contact_id, cards=len(card_ids))
+    if should_ask_phone:
+        messages.append(mc_text(
+            "Agent bilan bog'lab qo'yishim uchun telefon raqamingizni "
+            "yozib yuboring (masalan: +998901234567) 📞"
+        ))
+
+    logger.info("ig_message_out", contact=contact_id, cards=len(card_ids), asked_phone=should_ask_phone)
     return web.json_response(mc_response(messages))
+
+
+async def _handle_phone_submission(session, user: User, phone_text: str) -> dict:
+    """
+    Клиент прислал номер телефона отдельным сообщением. Сохраняем,
+    квалифицируем и уведомляем агента.
+    """
+    from src.bot.handlers.client.ai_consultation import _maybe_assign_hot_lead
+
+    phone = phone_text if phone_text.startswith("+") else f"+{phone_text}"
+    user.phone = phone
+    await session.commit()
+
+    profile = (
+        await session.execute(
+            select(ClientProfile).where(ClientProfile.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+
+    qualification = {
+        "qualification_score": (profile.qualification_score if profile else 0),
+        "budget_min_usd": (profile.budget_min_usd if profile else None),
+        "budget_max_usd": (profile.budget_max_usd if profile else None),
+        "preferred_districts": (profile.preferred_districts if profile else []),
+        "preferred_rooms": (profile.preferred_rooms if profile else []),
+        "purchase_timeline": (profile.purchase_timeline if profile else None),
+        "payment_method": (profile.payment_method if profile else None),
+        "summary": ((profile.notes if profile else None) or "Instagram orqali murojaat"),
+    }
+
+    bot = _get_notifier_bot(user.company_id)
+    if bot is not None:
+        try:
+            await _maybe_assign_hot_lead(
+                session, user, qualification, bot,
+                client_phone=phone, property_id=None,
+            )
+        except Exception as exc:
+            logger.warning("ig_lead_notify_failed", error=str(exc))
+    else:
+        logger.warning("ig_lead_notify_skipped_no_bot", user_id=user.id)
+
+    return mc_response([
+        mc_text("Rahmat jigar! Agentimiz tez orada bog'lanadi 🤝")
+    ])
 
 
 async def _upsert_profile(session, user_id: int, data: dict) -> None:
