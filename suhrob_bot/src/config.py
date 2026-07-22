@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     PREMIUM_EMOJI_FIRE: str = ""
     PREMIUM_EMOJI_STAR: str = ""
 
+    # Instagram webhook (ManyChat)
+    PUBLIC_BASE_URL: str = ""
+    INSTAGRAM_COMPANY_ID: Optional[int] = None
+
     @field_validator("DATABASE_URL")
     @classmethod
     def validate_db_url(cls, v: str) -> str:

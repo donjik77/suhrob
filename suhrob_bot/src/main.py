@@ -122,98 +122,22 @@ def register_routers(dp: Dispatcher) -> None:
     dp.include_router(dev_companies_router)
 
 # =====================================================================
-# HTTP-СЕРВЕР ДЛЯ INSTAGRAM (MANYCHAT)
+#  HTTP-СЕРВЕР ДЛЯ INSTAGRAM (ManyChat)
 # =====================================================================
-
-async def instagram_webhook(request):
-    try:
-        data = await request.json()
-
-        user_id = data.get("user_id")
-        user_message = data.get("message", "")
-
-        logging.info(
-            f"📩 Instagram message: {user_message} | user_id={user_id}"
-        )
-
-
-        if not user_message:
-            return web.json_response({
-                "answer": "Напишите ваш вопрос."
-            })
-
-
-        from src.services.instagram_service import process_instagram_message
-
-
-        ai_response_text = await process_instagram_message(
-            message=user_message,
-            user_id=int(user_id),
-            company_id=1
-        )
-
-
-        logging.info(
-            f"🤖 AI response: {ai_response_text}"
-        )
-
-
-        return web.json_response({
-            "answer": ai_response_text
-        })
-
-
-    except Exception as exc:
-        logging.exception(
-            "Instagram webhook error"
-        )
-
-        return web.json_response(
-            {
-                "error": str(exc)
-            },
-            status=500
-        )
-
-
-
-async def start_webhook_server():
+async def start_webhook_server(bot_manager):
+    from src.services.instagram_bridge import register_instagram_routes
 
     app = web.Application()
-
-    app.router.add_post(
-        "/webhook/instagram",
-        instagram_webhook
-    )
-
+    register_instagram_routes(app, bot_manager=bot_manager)
 
     runner = web.AppRunner(app)
-
     await runner.setup()
 
-
-    port = int(
-        os.environ.get(
-            "PORT",
-            8080
-        )
-    )
-
-
-    site = web.TCPSite(
-        runner,
-        "0.0.0.0",
-        port
-    )
-
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-
-
-    logging.info(
-        "✅ Instagram webhook running on port %s",
-        port
-    )
-
+    logging.info("Webhook-сервер для Instagram запущен на порту %s", port)
+    return runner
 # =====================================================================
 
 
@@ -247,11 +171,11 @@ async def main():
     except Exception:
         pass
 
-    # 🚀 ЗАПУСКАЕМ ВЕБ-СЕРВЕР ДЛЯ ИНСТАГРАМА ПЕРЕД ТЕЛЕГРАМ-БОТАМИ:
-    await start_webhook_server()
-
     # Start all company bots from DB
     await bot_manager.start_all()
+
+    # 🚀 ЗАПУСКАЕМ ВЕБ-СЕРВЕР ДЛЯ ИНСТАГРАМА:
+    await start_webhook_server(bot_manager)
 
     # If a fallback BOT_TOKEN is set and no bots loaded, run it for dev/initial setup
     if bot_manager.running_count() == 0 and dev_bot_token:
