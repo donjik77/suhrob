@@ -313,8 +313,8 @@ async def build_property_messages(session, company_id: int | None,
              if getattr(m.file_type, "value", m.file_type) == FileType.photo.value),
             None,
         )
-      if photo and PUBLIC_BASE_URL:
-            messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+           if photo and PUBLIC_BASE_URL:
+               messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
         caption = strip_html(format_property_card(prop, rate))
         messages.append(mc_text(caption))
 
