@@ -197,7 +197,7 @@ async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> boo
                 "messages": messages[:10],
             },
         },
-        "message_tag": "ACCOUNT_UPDATE",
+   
     }
 
     try:
