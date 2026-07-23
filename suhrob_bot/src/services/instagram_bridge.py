@@ -316,6 +316,16 @@ async def build_property_messages(session, company_id: int | None,
             # .jpg в конце обязателен: Instagram/ManyChat может не принять
             # URL картинки без расширения файла
             messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+        else:
+            # Явно логируем причину отсутствия фото — либо у объекта в базе
+            # нет ни одной фотографии (только видео/ничего), либо не задан
+            # PUBLIC_BASE_URL. Без этого лога непонятно, баг это или данные.
+            logger.warning(
+                "ig_no_photo_for_property",
+                property_id=prop.id,
+                media_count=len(prop.media or []),
+                has_public_base_url=bool(PUBLIC_BASE_URL),
+            )
 
         caption = strip_html(format_property_card(prop, rate))
         messages.append(mc_text(caption))
