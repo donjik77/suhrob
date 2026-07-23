@@ -314,8 +314,7 @@ async def build_property_messages(session, company_id: int | None,
             None,
         )
         if photo and PUBLIC_BASE_URL:
-            messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}"))
-
+messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
         caption = strip_html(format_property_card(prop, rate))
         messages.append(mc_text(caption))
 
@@ -336,7 +335,7 @@ async def media_proxy(request: web.Request) -> web.Response:
     Именно этот URL получает Instagram, поэтому токен бота наружу не утекает.
     """
     try:
-        media_id = int(request.match_info["media_id"])
+  media_id = int(request.match_info["media_id"].split(".")[0])
     except (KeyError, ValueError):
         return web.Response(status=400, text="bad media id")
 
