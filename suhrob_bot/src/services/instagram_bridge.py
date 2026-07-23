@@ -1,4 +1,6 @@
 """
+src/services/instagram_bridge.py
+
 Мост между ManyChat (Instagram) и существующей AI-логикой Telegram-бота.
 
 ЧТО ЭТО РЕШАЕТ
@@ -39,20 +41,38 @@ logger = structlog.get_logger()
 #  Настройки
 # ------------------------------------------------------------------ #
 
+# Публичный адрес твоего Railway-сервиса. ОБЯЗАТЕЛЬНО задать в переменных
+# окружения Railway, иначе Instagram не сможет скачать фото.
+# Пример: https://suhrob-production.up.railway.app
 PUBLIC_BASE_URL = (getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
-AI_TIMEOUT_SECONDS = 12
+
+# ManyChat обрывает соединение примерно через 10 секунд (клиент видит
+# статус 499 "client has closed the request"). Держим суммарное время
+# ответа СИЛЬНО ниже этого — 7с на AI + запас на карточки и сеть.
+AI_TIMEOUT_SECONDS = 7
+
+# Сколько карточек максимум показываем за один ответ.
+# Лимит ManyChat — 10 сообщений; на карточку уходит 2 (фото + текст).
 MAX_CARDS_PER_REPLY = 3
+
+# Максимальная длина одного текстового сообщения в Instagram DM.
 IG_TEXT_LIMIT = 950
+
+# ID компании, к которой относится Instagram-аккаунт.
+# Если не задан — берём первую активную компанию.
 INSTAGRAM_COMPANY_ID = getattr(settings, "INSTAGRAM_COMPANY_ID", None)
 
 
 # ------------------------------------------------------------------ #
-#  Разбор маркеров [CARD:ID]
+#  Разбор маркеров [CARD:ID] — та же логика, что в ai_consultation.py
 # ------------------------------------------------------------------ #
 
 _CARD_MARKER_RE = re.compile(r"\[CARD\s*:\s*(\d+)\]", re.IGNORECASE)
 _VISIBLE_PROPERTY_ID_RE = re.compile(r"(?:CARD_)?(?:#\s*)?ID[_:\-\s]*(\d+)", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# Тот же паттерн, что уже используется в Telegram-версии (favorites.py),
+# и тот же список триггеров "хочу агента", что в ai_consultation.py.
 _PHONE_RE = re.compile(r"^\+?\d[\d\s().\-]{6,}$")
 _AGENT_CONNECT_RE = re.compile(
     r"(agent|makler|rieltor|bog'?la|boglan|bog'lan|aloqa|telefon|ko'rish|korish|uchrash)",
@@ -101,14 +121,21 @@ def mc_response(messages: list[dict], actions: list | None = None,
     response = {
         "version": "v2",
         "content": {
+            # Без этой строки вложения в Instagram не работают.
             "type": "instagram",
-            "messages": messages[:10],
+            "messages": messages[:10],          # лимит ManyChat
             "actions": (actions or [])[:5],
             "quick_replies": (quick_replies or [])[:11],
         },
     }
 
     if keep_listening and PUBLIC_BASE_URL:
+        # КЛЮЧЕВОЙ МОМЕНТ: без этого блока ManyChat отвечает один раз и
+        # молчит — следующее сообщение от контакта не попадёт на наш
+        # вебхук, пока фло не будет запущено заново с нуля (а для этого
+        # нужно, чтобы текст снова совпал с триггером фло, например "uy").
+        # external_message_callback говорит ManyChat: "следующее текстовое
+        # сообщение этого контакта — сразу сюда, в обход всего фло".
         response["content"]["external_message_callback"] = {
             "url": f"{PUBLIC_BASE_URL}/webhook/instagram",
             "method": "post",
@@ -117,6 +144,9 @@ def mc_response(messages: list[dict], actions: list | None = None,
                 "user_id": "{{user_id}}",
                 "message": "{{last_input_text}}",
             },
+            # Максимум, который разрешает ManyChat — 1 день (в секундах).
+            # Если контакт не написал за это время, колбэк истекает и
+            # следующее сообщение снова пойдёт через обычный триггер фло.
             "timeout": 86400,
         }
 
@@ -198,6 +228,7 @@ async def build_property_messages(session, company_id: int | None,
         .options(selectinload(Property.media), selectinload(Property.agent))
     )
     props_by_id = {p.id: p for p in result.scalars().all()}
+    # Сохраняем порядок, в котором объекты назвал AI
     props = [props_by_id[pid] for pid in property_ids if pid in props_by_id]
     props = props[:MAX_CARDS_PER_REPLY]
 
@@ -215,6 +246,8 @@ async def build_property_messages(session, company_id: int | None,
 
     messages: list[dict] = []
     for prop in props:
+        # Первое фото объекта. Видео Instagram-каналом не поддерживается,
+        # поэтому берём только фотографии.
         photo = next(
             (m for m in (prop.media or [])
              if getattr(m.file_type, "value", m.file_type) == FileType.photo.value),
@@ -240,6 +273,7 @@ async def media_proxy(request: web.Request) -> web.Response:
     """
     GET /media/<media_id>
     Скачивает файл из Telegram по file_id и отдаёт байты наружу.
+    Именно этот URL получает Instagram, поэтому токен бота наружу не утекает.
     """
     try:
         media_id = int(request.match_info["media_id"])
@@ -288,6 +322,7 @@ async def media_proxy(request: web.Request) -> web.Response:
                 f"https://api.telegram.org/file/bot{token}/{file_path}"
             )
             if file_resp.status_code != 200:
+                # Ссылка могла протухнуть — сбрасываем кэш, пусть попробует снова
                 _file_path_cache.pop(media_id, None)
                 return web.Response(status=502, text="telegram download failed")
 
@@ -337,7 +372,9 @@ async def instagram_webhook(request: web.Request) -> web.Response:
 
     Все СЛЕДУЮЩИЕ сообщения этого контакта прилетают сюда же, но уже через
     external_message_callback (см. mc_response) — в его payload доступны
-    только user_id и message, gender там не передаётся.
+    только user_id и message, gender там не передаётся. Это не баг: пол
+    там просто не пробрасывается ManyChat-ом. AI получает его один раз в
+    начале разговора и обычно этого достаточно, чтобы удержать обращение.
     """
     try:
         data = await request.json()
@@ -356,10 +393,15 @@ async def instagram_webhook(request: web.Request) -> web.Response:
 
     logger.info("ig_message_in", contact=contact_id, text=user_message[:100])
 
+    # 1. Пользователь + история + профиль
     async with AsyncSessionFactory() as session:
         user = await get_or_create_ig_user(session, contact_id, first_name)
         company_id = user.company_id
 
+        # Если телефона ещё нет, а прилетело именно похожее на номер
+        # сообщение — почти наверняка это ответ на просьбу оставить
+        # контакт, а не обычный вопрос про недвижимость. Обрабатываем
+        # отдельно и не тратим вызов AI.
         if not user.phone and _PHONE_RE.match(user_message):
             reply = await _handle_phone_submission(session, user, user_message)
             return web.json_response(reply)
@@ -397,12 +439,14 @@ async def instagram_webhook(request: web.Request) -> web.Response:
                 "qualification_score": profile_row.qualification_score,
             }
 
+    # 2. Подсказка про пол, чтобы бот не сказал девушке "jigar"
     prompt_text = user_message
     if gender == "female":
         prompt_text += "\n[Mijoz ayol — 'singlim/opa' deb murojaat qil]"
     elif gender == "male":
         prompt_text += "\n[Mijoz erkak — 'jigar/radnoy/aka' deb murojaat qil]"
 
+    # 3. Вызов AI с жёстким таймаутом (ManyChat долго не ждёт)
     try:
         raw_reply = await asyncio.wait_for(
             _run_ai(prompt_text, history, client_profile, company_id),
@@ -419,6 +463,7 @@ async def instagram_webhook(request: web.Request) -> web.Response:
             mc_text("Kechirasiz, texnik nosozlik. Qaytadan urinib ko'ring.")
         ]))
 
+    # 4. ВОТ ТО, ЧЕГО НЕ ХВАТАЛО: разворачиваем [CARD:162] в реальные карточки
     card_ids = extract_property_card_ids(raw_reply)
     text_reply = clean_ai_reply(raw_reply) if card_ids else raw_reply
 
@@ -433,24 +478,20 @@ async def instagram_webhook(request: web.Request) -> web.Response:
         ))
         await session.commit()
 
-        should_ask_phone = False
-        try:
-            all_history = history + [
-                {"role": "user", "content": user_message},
-                {"role": "assistant", "content": text_reply},
-            ]
-            qualification = await ai_service.qualify_client(all_history)
-            await _upsert_profile(session, user.id, qualification)
+        # 5. Быстрый детект "клиент попросил агента" — по ключевым словам,
+        # БЕЗ второго вызова AI. Сам вызов qualify_client выносим в фон
+        # (см. ниже), иначе суммарное время двух AI-запросов легко выходит
+        # за 10 секунд ManyChat и клиент получает 499.
+        should_ask_phone = (
+            not user.phone and bool(_AGENT_CONNECT_RE.search(user_message))
+        )
 
-            should_ask_phone = (
-                not user.phone
-                and (
-                    qualification.get("qualification_score", 0) >= QUALIFY_SCORE_THRESHOLD
-                    or _AGENT_CONNECT_RE.search(user_message)
-                )
-            )
-        except Exception as exc:
-            logger.warning("ig_qualify_failed", error=str(exc))
+        history_for_qualify = history + [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": text_reply},
+        ]
+        # fire-and-forget: клиенту уже отдаём ответ, профиль обновится позже
+        asyncio.create_task(_qualify_in_background(user.id, history_for_qualify))
 
     if should_ask_phone:
         messages.append(mc_text(
@@ -462,10 +503,36 @@ async def instagram_webhook(request: web.Request) -> web.Response:
     return web.json_response(mc_response(messages))
 
 
+async def _qualify_in_background(user_id: int, history: list[dict]) -> None:
+    """
+    Запускается через asyncio.create_task после ответа клиенту.
+    Клиент уже получил сообщение, здесь просто обновляем профиль в БД —
+    результат нужен только для будущих сообщений и уведомлений агенту.
+    """
+    try:
+        qualification = await asyncio.wait_for(
+            ai_service.qualify_client(history), timeout=25
+        )
+    except asyncio.TimeoutError:
+        logger.warning("ig_qualify_bg_timeout", user_id=user_id)
+        return
+    except Exception as exc:
+        logger.warning("ig_qualify_bg_failed", user_id=user_id, error=str(exc))
+        return
+
+    try:
+        async with AsyncSessionFactory() as session:
+            await _upsert_profile(session, user_id, qualification)
+    except Exception as exc:
+        logger.warning("ig_qualify_bg_save_failed", user_id=user_id, error=str(exc))
+
+
 async def _handle_phone_submission(session, user: User, phone_text: str) -> dict:
     """
-    Клиент прислал номер телефона отдельным сообщением. Сохраняем,
-    квалифицируем и уведомляем агента.
+    Клиент прислал номер телефона отдельным сообщением (без нажатия
+    какой-либо кнопки в ManyChat — просто написал текстом). Сохраняем,
+    квалифицируем по уже накопленному профилю и уведомляем агента —
+    той же функцией, что использует Telegram-версия.
     """
     from src.bot.handlers.client.ai_consultation import _maybe_assign_hot_lead
 
@@ -548,13 +615,16 @@ async def _upsert_profile(session, user_id: int, data: dict) -> None:
 
 
 # ------------------------------------------------------------------ #
-#  Приём телефона
+#  Приём телефона (отдельный шаг воронки в ManyChat)
 # ------------------------------------------------------------------ #
 
 async def instagram_phone_webhook(request: web.Request) -> web.Response:
     """
     POST /webhook/instagram/phone
     Тело: {"user_id": "{{Contact Id}}", "phone": "{{Phone}}"}
+
+    Вызывать из ManyChat после того, как клиент оставил номер.
+    Сохраняет телефон и уведомляет агента в Telegram.
     """
     try:
         data = await request.json()
@@ -608,6 +678,7 @@ async def instagram_phone_webhook(request: web.Request) -> web.Response:
     ]))
 
 
+# BotManager сохраняем при старте, чтобы уметь писать агентам в Telegram
 _bot_manager = None
 
 
