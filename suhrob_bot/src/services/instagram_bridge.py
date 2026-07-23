@@ -191,15 +191,14 @@ async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> boo
     if not messages:
         return True
 
+    # ВАЖНО: используем mc_response(), а не собираем content вручную —
+    # именно она добавляет external_message_callback. Раньше подписка на
+    # "следующее сообщение" уходила только в пустом ack-ответе вебхука,
+    # а настоящий контент через API летел без неё — цикл обрывался после
+    # первого ответа. Теперь callback едет вместе с реальным содержимым.
     payload = {
         "subscriber_id": int(subscriber_id),
-        "data": {
-            "version": "v2",
-            "content": {
-                "type": "instagram",
-                "messages": messages[:10],
-            },
-        },
+        "data": mc_response(messages),
     }
 
     try:
