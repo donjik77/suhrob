@@ -197,7 +197,6 @@ async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> boo
                 "messages": messages[:10],
             },
         },
-   
     }
 
     try:
@@ -313,8 +312,11 @@ async def build_property_messages(session, company_id: int | None,
              if getattr(m.file_type, "value", m.file_type) == FileType.photo.value),
             None,
         )
-           if photo and PUBLIC_BASE_URL:
-               messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+        if photo and PUBLIC_BASE_URL:
+            # .jpg в конце обязателен: Instagram/ManyChat может не принять
+            # URL картинки без расширения файла
+            messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+
         caption = strip_html(format_property_card(prop, rate))
         messages.append(mc_text(caption))
 
@@ -335,7 +337,9 @@ async def media_proxy(request: web.Request) -> web.Response:
     Именно этот URL получает Instagram, поэтому токен бота наружу не утекает.
     """
     try:
-  media_id = int(request.match_info["media_id"].split(".")[0])
+        raw_id = request.match_info["media_id"]
+        # Принимаем и "455", и "455.jpg" — расширение просто отбрасываем
+        media_id = int(raw_id.split(".")[0])
     except (KeyError, ValueError):
         return web.Response(status=400, text="bad media id")
 
