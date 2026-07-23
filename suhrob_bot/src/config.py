@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     # Instagram webhook (ManyChat)
     PUBLIC_BASE_URL: str = ""
     INSTAGRAM_COMPANY_ID: Optional[int] = None
+    MANYCHAT_API_TOKEN: str = ""
 
     @field_validator("DATABASE_URL")
     @classmethod
