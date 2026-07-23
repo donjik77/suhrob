@@ -58,8 +58,11 @@ MANYCHAT_API_TOKEN = (getattr(settings, "MANYCHAT_API_TOKEN", "") or "").strip()
 MANYCHAT_SEND_URL = "https://api.manychat.com/fb/sending/sendContent"
 
 # Сколько карточек максимум показываем за один ответ.
-# Лимит ManyChat — 10 сообщений; на карточку уходит 2 (фото + текст).
-MAX_CARDS_PER_REPLY = 3
+# Лимит ManyChat — 10 сообщений на ответ. При MAX_PHOTOS_PER_PROPERTY=4
+# (4 фото + 1 текст = 5 слотов на объект) больше 2 объектов не влезет —
+# 2*5=10 ровно в лимит. Если увеличишь одно число — уменьши другое.
+MAX_CARDS_PER_REPLY = 2
+MAX_PHOTOS_PER_PROPERTY = 4
 
 # Максимальная длина одного текстового сообщения в Instagram DM.
 IG_TEXT_LIMIT = 950
@@ -305,17 +308,18 @@ async def build_property_messages(session, company_id: int | None,
 
     messages: list[dict] = []
     for prop in props:
-        # Первое фото объекта. Видео Instagram-каналом не поддерживается,
-        # поэтому берём только фотографии.
-        photo = next(
-            (m for m in (prop.media or [])
-             if getattr(m.file_type, "value", m.file_type) == FileType.photo.value),
-            None,
-        )
-        if photo and PUBLIC_BASE_URL:
-            # .jpg в конце обязателен: Instagram/ManyChat может не принять
-            # URL картинки без расширения файла
-            messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+        # Все фото объекта (видео пропускаем — Instagram-канал его не
+        # поддерживает), берём первые MAX_PHOTOS_PER_PROPERTY штук.
+        photos = [
+            m for m in (prop.media or [])
+            if getattr(m.file_type, "value", m.file_type) == FileType.photo.value
+        ][:MAX_PHOTOS_PER_PROPERTY]
+
+        if photos and PUBLIC_BASE_URL:
+            for photo in photos:
+                # .jpg в конце обязателен: Instagram/ManyChat может не
+                # принять URL картинки без расширения файла
+                messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
         else:
             # Явно логируем причину отсутствия фото — либо у объекта в базе
             # нет ни одной фотографии (только видео/ничего), либо не задан
