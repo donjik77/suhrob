@@ -182,7 +182,9 @@ def mc_ack() -> dict:
 async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> bool:
     """
     Отправляет готовые сообщения контакту через ManyChat API (sendContent).
-    Это позволяет отвечать асинхронно — без лимита 10 секунд на вебхук.
+    Лимит одного вызова — 10 сообщений, поэтому длинные ответы
+    (текст + 2 объекта по 4 фото + описания = 11) режем на пачки
+    и шлём несколькими вызовами подряд. Порядок сохраняется.
     """
     if not MANYCHAT_API_TOKEN:
         logger.error("manychat_token_missing",
@@ -191,35 +193,45 @@ async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> boo
     if not messages:
         return True
 
-    # ВАЖНО: используем mc_response(), а не собираем content вручную —
-    # именно она добавляет external_message_callback. Раньше подписка на
-    # "следующее сообщение" уходила только в пустом ack-ответе вебхука,
-    # а настоящий контент через API летел без неё — цикл обрывался после
-    # первого ответа. Теперь callback едет вместе с реальным содержимым.
-    payload = {
-        "subscriber_id": int(subscriber_id),
-        "data": mc_response(messages),
-    }
+    BATCH = 10
+    batches = [messages[i:i + BATCH] for i in range(0, len(messages), BATCH)]
 
-    try:
-        async with httpx.AsyncClient(timeout=15) as http:
-            resp = await http.post(
-                MANYCHAT_SEND_URL,
-                headers={
-                    "Authorization": f"Bearer {MANYCHAT_API_TOKEN}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-        body = resp.json() if resp.content else {}
-        if resp.status_code == 200 and body.get("status") == "success":
-            return True
-        logger.error("manychat_send_failed", subscriber=subscriber_id,
-                     status=resp.status_code, body=str(body)[:300])
-        return False
-    except Exception as exc:
-        logger.error("manychat_send_error", subscriber=subscriber_id, error=str(exc))
-        return False
+    ok_all = True
+    for idx, batch in enumerate(batches):
+        is_last = idx == len(batches) - 1
+        # external_message_callback вешаем только на ПОСЛЕДНЮЮ пачку —
+        # подписка на следующее сообщение должна регистрироваться после
+        # того, как весь ответ доставлен.
+        payload = {
+            "subscriber_id": int(subscriber_id),
+            "data": mc_response(batch, keep_listening=is_last),
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as http:
+                resp = await http.post(
+                    MANYCHAT_SEND_URL,
+                    headers={
+                        "Authorization": f"Bearer {MANYCHAT_API_TOKEN}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+            body = resp.json() if resp.content else {}
+            if not (resp.status_code == 200 and body.get("status") == "success"):
+                logger.error("manychat_send_failed", subscriber=subscriber_id,
+                             batch=idx, status=resp.status_code, body=str(body)[:300])
+                ok_all = False
+        except Exception as exc:
+            logger.error("manychat_send_error", subscriber=subscriber_id,
+                         batch=idx, error=str(exc))
+            ok_all = False
+
+        # Небольшая пауза между пачками, чтобы сообщения пришли по порядку
+        if not is_last:
+            await asyncio.sleep(0.6)
+
+    return ok_all
 
 
 # ------------------------------------------------------------------ #
