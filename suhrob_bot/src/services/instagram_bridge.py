@@ -46,10 +46,16 @@ logger = structlog.get_logger()
 # Пример: https://suhrob-production.up.railway.app
 PUBLIC_BASE_URL = (getattr(settings, "PUBLIC_BASE_URL", "") or "").rstrip("/")
 
-# ManyChat обрывает соединение примерно через 10 секунд (клиент видит
-# статус 499 "client has closed the request"). Держим суммарное время
-# ответа СИЛЬНО ниже этого — 7с на AI + запас на карточки и сеть.
-AI_TIMEOUT_SECONDS = 7
+# АСИНХРОННАЯ СХЕМА: мы больше НЕ отвечаем контентом внутри запроса ManyChat.
+# Вебхук мгновенно возвращает пустой ack (укладывается в долю секунды),
+# а готовый ответ уходит отдельным вызовом ManyChat API (sendContent).
+# Поэтому AI может думать сколько нужно — лимит ManyChat нас не касается.
+AI_TIMEOUT_SECONDS = 30
+
+# Токен ManyChat API: Settings -> API -> сгенерировать.
+# Добавить в Railway Variables как MANYCHAT_API_TOKEN.
+MANYCHAT_API_TOKEN = (getattr(settings, "MANYCHAT_API_TOKEN", "") or "").strip()
+MANYCHAT_SEND_URL = "https://api.manychat.com/fb/sending/sendContent"
 
 # Сколько карточек максимум показываем за один ответ.
 # Лимит ManyChat — 10 сообщений; на карточку уходит 2 (фото + текст).
@@ -159,6 +165,60 @@ def mc_text(text: str) -> dict:
 
 def mc_image(url: str) -> dict:
     return {"type": "image", "url": url}
+
+
+def mc_ack() -> dict:
+    """
+    Мгновенный пустой ответ на запрос ManyChat: сообщений нет, но
+    external_message_callback внутри mc_response продолжает слушать
+    следующие сообщения контакта. Реальный контент уйдёт через API.
+    """
+    return mc_response([], keep_listening=True)
+
+
+async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> bool:
+    """
+    Отправляет готовые сообщения контакту через ManyChat API (sendContent).
+    Это позволяет отвечать асинхронно — без лимита 10 секунд на вебхук.
+    """
+    if not MANYCHAT_API_TOKEN:
+        logger.error("manychat_token_missing",
+                     hint="Задай MANYCHAT_API_TOKEN в Railway Variables")
+        return False
+    if not messages:
+        return True
+
+    payload = {
+        "subscriber_id": int(subscriber_id),
+        "data": {
+            "version": "v2",
+            "content": {
+                "type": "instagram",
+                "messages": messages[:10],
+            },
+        },
+        "message_tag": "ACCOUNT_UPDATE",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.post(
+                MANYCHAT_SEND_URL,
+                headers={
+                    "Authorization": f"Bearer {MANYCHAT_API_TOKEN}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        body = resp.json() if resp.content else {}
+        if resp.status_code == 200 and body.get("status") == "success":
+            return True
+        logger.error("manychat_send_failed", subscriber=subscriber_id,
+                     status=resp.status_code, body=str(body)[:300])
+        return False
+    except Exception as exc:
+        logger.error("manychat_send_error", subscriber=subscriber_id, error=str(exc))
+        return False
 
 
 # ------------------------------------------------------------------ #
@@ -393,18 +453,33 @@ async def instagram_webhook(request: web.Request) -> web.Response:
 
     logger.info("ig_message_in", contact=contact_id, text=user_message[:100])
 
+    # АСИНХРОННАЯ СХЕМА: немедленно подтверждаем приём (ManyChat получает
+    # валидный пустой ответ за доли секунды — таймаут 499 невозможен),
+    # а думаем и отвечаем в фоне через ManyChat API.
+    asyncio.create_task(
+        _process_and_reply(contact_id, user_message, first_name, gender)
+    )
+    return web.json_response(mc_ack())
+
+
+async def _process_and_reply(contact_id: str, user_message: str,
+                             first_name: str | None, gender: str) -> None:
+    """
+    Вся тяжёлая работа — вне HTTP-запроса ManyChat:
+    пользователь -> история -> AI -> карточки -> отправка через API.
+    """
     # 1. Пользователь + история + профиль
     async with AsyncSessionFactory() as session:
         user = await get_or_create_ig_user(session, contact_id, first_name)
         company_id = user.company_id
 
-        # Если телефона ещё нет, а прилетело именно похожее на номер
-        # сообщение — почти наверняка это ответ на просьбу оставить
-        # контакт, а не обычный вопрос про недвижимость. Обрабатываем
-        # отдельно и не тратим вызов AI.
+        # Телефон, присланный текстом — отдельная быстрая ветка без AI
         if not user.phone and _PHONE_RE.match(user_message):
             reply = await _handle_phone_submission(session, user, user_message)
-            return web.json_response(reply)
+            await send_via_manychat_api(
+                contact_id, reply.get("content", {}).get("messages", [])
+            )
+            return
 
         history_rows = (
             await session.execute(
@@ -446,7 +521,7 @@ async def instagram_webhook(request: web.Request) -> web.Response:
     elif gender == "male":
         prompt_text += "\n[Mijoz erkak — 'jigar/radnoy/aka' deb murojaat qil]"
 
-    # 3. Вызов AI с жёстким таймаутом (ManyChat долго не ждёт)
+    # 3. Вызов AI — теперь можно ждать по-настоящему (мы вне HTTP-запроса)
     try:
         raw_reply = await asyncio.wait_for(
             _run_ai(prompt_text, history, client_profile, company_id),
@@ -454,16 +529,18 @@ async def instagram_webhook(request: web.Request) -> web.Response:
         )
     except asyncio.TimeoutError:
         logger.warning("ig_ai_timeout", contact=contact_id)
-        return web.json_response(mc_response([
+        await send_via_manychat_api(contact_id, [
             mc_text("Sal sekinlashdim jigar, yana bir marta yozib yuboring 🤝")
-        ]))
+        ])
+        return
     except Exception as exc:
         logger.error("ig_ai_error", contact=contact_id, error=str(exc))
-        return web.json_response(mc_response([
+        await send_via_manychat_api(contact_id, [
             mc_text("Kechirasiz, texnik nosozlik. Qaytadan urinib ko'ring.")
-        ]))
+        ])
+        return
 
-    # 4. ВОТ ТО, ЧЕГО НЕ ХВАТАЛО: разворачиваем [CARD:162] в реальные карточки
+    # 4. Разворачиваем [CARD:162] в реальные карточки
     card_ids = extract_property_card_ids(raw_reply)
     text_reply = clean_ai_reply(raw_reply) if card_ids else raw_reply
 
@@ -478,10 +555,8 @@ async def instagram_webhook(request: web.Request) -> web.Response:
         ))
         await session.commit()
 
-        # 5. Быстрый детект "клиент попросил агента" — по ключевым словам,
-        # БЕЗ второго вызова AI. Сам вызов qualify_client выносим в фон
-        # (см. ниже), иначе суммарное время двух AI-запросов легко выходит
-        # за 10 секунд ManyChat и клиент получает 499.
+        # 5. Быстрый детект "клиент попросил агента" — по ключевым словам.
+        # Квалификация — отдельной фоновой задачей, как и раньше.
         should_ask_phone = (
             not user.phone and bool(_AGENT_CONNECT_RE.search(user_message))
         )
@@ -490,7 +565,6 @@ async def instagram_webhook(request: web.Request) -> web.Response:
             {"role": "user", "content": user_message},
             {"role": "assistant", "content": text_reply},
         ]
-        # fire-and-forget: клиенту уже отдаём ответ, профиль обновится позже
         asyncio.create_task(_qualify_in_background(user.id, history_for_qualify))
 
     if should_ask_phone:
@@ -499,8 +573,9 @@ async def instagram_webhook(request: web.Request) -> web.Response:
             "yozib yuboring (masalan: +998901234567) 📞"
         ))
 
-    logger.info("ig_message_out", contact=contact_id, cards=len(card_ids), asked_phone=should_ask_phone)
-    return web.json_response(mc_response(messages))
+    sent = await send_via_manychat_api(contact_id, messages)
+    logger.info("ig_message_out", contact=contact_id, cards=len(card_ids),
+                asked_phone=should_ask_phone, sent=sent)
 
 
 async def _qualify_in_background(user_id: int, history: list[dict]) -> None:
