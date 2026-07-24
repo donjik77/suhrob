@@ -179,22 +179,41 @@ def mc_ack() -> dict:
     return mc_response([], keep_listening=True)
 
 
-async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> bool:
+async def send_via_manychat_api(
+    subscriber_id: str,
+    messages: list[dict] | None = None,
+    groups: list[list[dict]] | None = None,
+) -> bool:
     """
     Отправляет готовые сообщения контакту через ManyChat API (sendContent).
-    Лимит одного вызова — 10 сообщений, поэтому длинные ответы
-    (текст + 2 объекта по 4 фото + описания = 11) режем на пачки
-    и шлём несколькими вызовами подряд. Порядок сохраняется.
+
+    Можно передать либо плоский список messages, либо groups — список
+    групп сообщений. Каждая группа уходит ОТДЕЛЬНЫМ вызовом API с паузой
+    между вызовами. Это критично для карточек недвижимости: если слать
+    описание и фото разных объектов одной пачкой, Instagram доставляет
+    тексты мгновенно, а фото с задержкой (Meta ещё скачивает их с нашего
+    сервера) — и сообщения перемешиваются: первая карточка выглядит без
+    фото, последняя — без описания. Отдельный вызов на каждый объект +
+    пауза удерживают порядок: описание объекта, следом его фото.
+
+    Лимит одного вызова — 10 сообщений; группы длиннее 10 дорезаются.
     """
     if not MANYCHAT_API_TOKEN:
         logger.error("manychat_token_missing",
                      hint="Задай MANYCHAT_API_TOKEN в Railway Variables")
         return False
-    if not messages:
+
+    if groups is None:
+        groups = [messages] if messages else []
+    groups = [g for g in groups if g]
+    if not groups:
         return True
 
     BATCH = 10
-    batches = [messages[i:i + BATCH] for i in range(0, len(messages), BATCH)]
+    batches: list[list[dict]] = []
+    for group in groups:
+        for i in range(0, len(group), BATCH):
+            batches.append(group[i:i + BATCH])
 
     ok_all = True
     for idx, batch in enumerate(batches):
@@ -227,9 +246,10 @@ async def send_via_manychat_api(subscriber_id: str, messages: list[dict]) -> boo
                          batch=idx, error=str(exc))
             ok_all = False
 
-        # Небольшая пауза между пачками, чтобы сообщения пришли по порядку
+        # Пауза между пачками: даём Instagram время доставить фото
+        # предыдущей группы до отправки следующей, иначе порядок ломается
         if not is_last:
-            await asyncio.sleep(0.6)
+            await asyncio.sleep(1.2)
 
     return ok_all
 
@@ -286,8 +306,16 @@ async def get_or_create_ig_user(session, contact_id: str, first_name: str | None
 # ------------------------------------------------------------------ #
 
 async def build_property_messages(session, company_id: int | None,
-                                  property_ids: list[int]) -> list[dict]:
-    """Превращает список ID объектов в сообщения ManyChat (фото + описание)."""
+                                  property_ids: list[int]) -> list[list[dict]]:
+    """
+    Превращает список ID объектов в ГРУППЫ сообщений ManyChat.
+    Одна группа = один объект: [описание, фото, фото, ...].
+    Описание идёт ПЕРВЫМ — тексты Instagram доставляет мгновенно,
+    а фото с задержкой, поэтому при обратном порядке описание
+    "убегало" к чужой карточке. Каждая группа отправляется отдельным
+    вызовом API (см. send_via_manychat_api), чтобы карточки
+    не перемешивались между собой.
+    """
     if not company_id or not property_ids:
         return []
 
@@ -317,9 +345,15 @@ async def build_property_messages(session, company_id: int | None,
 
     rate = await SettingsRepository(session).get_float("currency_rate_uzs_per_usd", 12600.0)
 
-    messages: list[dict] = []
+    groups: list[list[dict]] = []
     for prop in props:
-        # Все фото объекта (видео пропускаем — Instagram-канал его не
+        card: list[dict] = []
+
+        # 1. Описание — ПЕРВЫМ сообщением карточки
+        caption = strip_html(format_property_card(prop, rate))
+        card.append(mc_text(caption))
+
+        # 2. Фото — следом (видео пропускаем — Instagram-канал его не
         # поддерживает), берём первые MAX_PHOTOS_PER_PROPERTY штук.
         photos = [
             m for m in (prop.media or [])
@@ -330,7 +364,7 @@ async def build_property_messages(session, company_id: int | None,
             for photo in photos:
                 # .jpg в конце обязателен: Instagram/ManyChat может не
                 # принять URL картинки без расширения файла
-                messages.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+                card.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
         else:
             # Явно логируем причину отсутствия фото — либо у объекта в базе
             # нет ни одной фотографии (только видео/ничего), либо не задан
@@ -342,10 +376,9 @@ async def build_property_messages(session, company_id: int | None,
                 has_public_base_url=bool(PUBLIC_BASE_URL),
             )
 
-        caption = strip_html(format_property_card(prop, rate))
-        messages.append(mc_text(caption))
+        groups.append(card)
 
-    return messages
+    return groups
 
 
 # ------------------------------------------------------------------ #
@@ -568,15 +601,18 @@ async def _process_and_reply(contact_id: str, user_message: str,
         ])
         return
 
-    # 4. Разворачиваем [CARD:162] в реальные карточки
+    # 4. Разворачиваем [CARD:162] в реальные карточки.
+    # Ответ собираем ГРУППАМИ: [текст AI], [карточка 1], [карточка 2], ...
+    # Каждая группа уйдёт отдельным вызовом ManyChat API — так описание
+    # и фото одного объекта не перемешиваются с соседним.
     card_ids = extract_property_card_ids(raw_reply)
     text_reply = clean_ai_reply(raw_reply) if card_ids else raw_reply
 
-    messages: list[dict] = [mc_text(text_reply)]
+    groups: list[list[dict]] = [[mc_text(text_reply)]]
 
     async with AsyncSessionFactory() as session:
         if card_ids:
-            messages.extend(await build_property_messages(session, company_id, card_ids))
+            groups.extend(await build_property_messages(session, company_id, card_ids))
 
         session.add(ClientConversation(
             user_id=user.id, property_id=None, role="assistant", message=text_reply,
@@ -596,12 +632,12 @@ async def _process_and_reply(contact_id: str, user_message: str,
         asyncio.create_task(_qualify_in_background(user.id, history_for_qualify))
 
     if should_ask_phone:
-        messages.append(mc_text(
+        groups.append([mc_text(
             "Agent bilan bog'lab qo'yishim uchun telefon raqamingizni "
             "yozib yuboring (masalan: +998901234567) 📞"
-        ))
+        )])
 
-    sent = await send_via_manychat_api(contact_id, messages)
+    sent = await send_via_manychat_api(contact_id, groups=groups)
     logger.info("ig_message_out", contact=contact_id, cards=len(card_ids),
                 asked_phone=should_ask_phone, sent=sent)
 
