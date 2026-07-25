@@ -64,6 +64,10 @@ MANYCHAT_SEND_URL = "https://api.manychat.com/fb/sending/sendContent"
 MAX_CARDS_PER_REPLY = 2
 MAX_PHOTOS_PER_PROPERTY = 4
 
+# Версия моста — видна в GET /health. По ней проверяем, что Railway
+# реально запустил свежий код, а не кэшированную сборку.
+BRIDGE_VERSION = "2026-07-25-photo-order-v2"
+
 # Максимальная длина одного текстового сообщения в Instagram DM.
 IG_TEXT_LIMIT = 950
 
@@ -246,10 +250,14 @@ async def send_via_manychat_api(
                          batch=idx, error=str(exc))
             ok_all = False
 
-        # Пауза между пачками: даём Instagram время доставить фото
-        # предыдущей группы до отправки следующей, иначе порядок ломается
+        # Пауза между пачками. После пачки С ФОТО ждём дольше: Meta
+        # должна успеть скачать и доставить картинки до того, как уйдёт
+        # текст следующей карточки — иначе порядок ломается.
         if not is_last:
-            await asyncio.sleep(1.2)
+            has_images = any(
+                m.get("type") == "image" for m in batch if isinstance(m, dict)
+            )
+            await asyncio.sleep(2.5 if has_images else 0.8)
 
     return ok_all
 
@@ -378,6 +386,16 @@ async def build_property_messages(session, company_id: int | None,
 
         groups.append(card)
 
+    # ПРЕДПРОГРЕВ: скачиваем все фото из Telegram в кэш ДО отправки.
+    # Instagram заберёт их с нашего сервера мгновенно — фото не будут
+    # опаздывать и порядок "описание → фото" сохранится.
+    photo_ids: list[int] = []
+    for prop in props:
+        for m in (prop.media or []):
+            if getattr(m.file_type, "value", m.file_type) == FileType.photo.value:
+                photo_ids.append(m.id)
+    await prefetch_media(photo_ids[:MAX_CARDS_PER_REPLY * MAX_PHOTOS_PER_PROPERTY])
+
     return groups
 
 
@@ -387,19 +405,31 @@ async def build_property_messages(session, company_id: int | None,
 
 _file_path_cache: dict[int, str] = {}
 
+# Кэш САМИХ БАЙТОВ фото. Критично для порядка сообщений: Instagram
+# доставляет фото клиенту только после того, как скачает его с нашего
+# сервера. Если при этом мы ходим в Telegram (1-3 сек на фото) — фото
+# опаздывают, и тексты следующих карточек проскакивают вперёд.
+# Поэтому перед отправкой карточек мы ПРЕДПРОГРЕВАЕМ кэш (скачиваем
+# все фото заранее), и Meta получает байты мгновенно.
+_media_bytes_cache: dict[int, tuple[bytes, str]] = {}
+_MEDIA_CACHE_MAX = 80
 
-async def media_proxy(request: web.Request) -> web.Response:
+
+def _cache_media_bytes(media_id: int, body: bytes, content_type: str) -> None:
+    if len(_media_bytes_cache) >= _MEDIA_CACHE_MAX:
+        # Простое вытеснение самого старого элемента
+        _media_bytes_cache.pop(next(iter(_media_bytes_cache)), None)
+    _media_bytes_cache[media_id] = (body, content_type)
+
+
+async def _download_media_bytes(media_id: int) -> tuple[bytes, str] | None:
     """
-    GET /media/<media_id>
-    Скачивает файл из Telegram по file_id и отдаёт байты наружу.
-    Именно этот URL получает Instagram, поэтому токен бота наружу не утекает.
+    Скачивает фото из Telegram по media_id и кладёт в кэш.
+    Возвращает (байты, content_type) или None при ошибке.
     """
-    try:
-        raw_id = request.match_info["media_id"]
-        # Принимаем и "455", и "455.jpg" — расширение просто отбрасываем
-        media_id = int(raw_id.split(".")[0])
-    except (KeyError, ValueError):
-        return web.Response(status=400, text="bad media id")
+    cached = _media_bytes_cache.get(media_id)
+    if cached:
+        return cached
 
     async with AsyncSessionFactory() as session:
         media = (
@@ -409,10 +439,8 @@ async def media_proxy(request: web.Request) -> web.Response:
                 .options(selectinload(PropertyMedia.property))
             )
         ).scalar_one_or_none()
-
         if not media:
-            return web.Response(status=404, text="not found")
-
+            return None
         company = (
             await session.execute(
                 select(Company).where(Company.id == media.property.company_id)
@@ -420,8 +448,7 @@ async def media_proxy(request: web.Request) -> web.Response:
         ).scalar_one_or_none()
 
     if not company or not company.bot_token:
-        return web.Response(status=404, text="no bot token")
-
+        return None
     token = company.bot_token
 
     try:
@@ -435,7 +462,7 @@ async def media_proxy(request: web.Request) -> web.Response:
                 data = r.json()
                 if not data.get("ok"):
                     logger.warning("getfile_failed", media_id=media_id, resp=data)
-                    return web.Response(status=502, text="telegram getFile failed")
+                    return None
                 file_path = data["result"]["file_path"]
                 _file_path_cache[media_id] = file_path
 
@@ -443,22 +470,61 @@ async def media_proxy(request: web.Request) -> web.Response:
                 f"https://api.telegram.org/file/bot{token}/{file_path}"
             )
             if file_resp.status_code != 200:
-                # Ссылка могла протухнуть — сбрасываем кэш, пусть попробует снова
                 _file_path_cache.pop(media_id, None)
-                return web.Response(status=502, text="telegram download failed")
+                return None
 
             content_type = "image/jpeg"
             if file_path.lower().endswith(".png"):
                 content_type = "image/png"
 
-            return web.Response(
-                body=file_resp.content,
-                content_type=content_type,
-                headers={"Cache-Control": "public, max-age=86400"},
-            )
+            _cache_media_bytes(media_id, file_resp.content, content_type)
+            return file_resp.content, content_type
     except Exception as exc:
-        logger.error("media_proxy_error", media_id=media_id, error=str(exc))
-        return web.Response(status=500, text="proxy error")
+        logger.error("media_download_error", media_id=media_id, error=str(exc))
+        return None
+
+
+async def prefetch_media(media_ids: list[int]) -> None:
+    """Параллельно прогревает кэш фото ДО отправки карточек клиенту."""
+    if not media_ids:
+        return
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                *(_download_media_bytes(mid) for mid in media_ids),
+                return_exceptions=True,
+            ),
+            timeout=12,
+        )
+        logger.info("media_prefetched", count=len(media_ids))
+    except asyncio.TimeoutError:
+        logger.warning("media_prefetch_timeout", count=len(media_ids))
+
+
+async def media_proxy(request: web.Request) -> web.Response:
+    """
+    GET /media/<media_id>
+    Отдаёт байты фото наружу (для Instagram). Сначала смотрит кэш —
+    после предпрогрева ответ мгновенный, скачивание из Telegram
+    происходит только если кэш пуст.
+    """
+    try:
+        raw_id = request.match_info["media_id"]
+        # Принимаем и "455", и "455.jpg" — расширение просто отбрасываем
+        media_id = int(raw_id.split(".")[0])
+    except (KeyError, ValueError):
+        return web.Response(status=400, text="bad media id")
+
+    result = await _download_media_bytes(media_id)
+    if not result:
+        return web.Response(status=404, text="not found")
+
+    body, content_type = result
+    return web.Response(
+        body=body,
+        content_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -841,4 +907,5 @@ def register_instagram_routes(app: web.Application, bot_manager=None) -> None:
     app.router.add_post("/webhook/instagram", instagram_webhook)
     app.router.add_post("/webhook/instagram/phone", instagram_phone_webhook)
     app.router.add_get("/media/{media_id}", media_proxy)
-    app.router.add_get("/health", lambda r: web.json_response({"ok": True}))
+    app.router.add_get("/health", lambda r: web.json_response(
+        {"ok": True, "version": BRIDGE_VERSION}))
