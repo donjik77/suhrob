@@ -6,6 +6,7 @@ Set OPENROUTER_API_KEY and OPENROUTER_MODEL in your .env file.
 """
 import json
 import re
+import time
 import structlog
 from typing import Optional
 
@@ -132,6 +133,7 @@ async def qualify_client(conversation: list[dict]) -> dict:
     {
       budget_min_usd, budget_max_usd, preferred_districts, preferred_rooms,
       property_type, purchase_timeline, payment_method,
+      client_name, client_gender, promo_code,
       qualification_score, summary
     }
     Returns safe defaults on error.
@@ -152,6 +154,10 @@ Suhbatdan quyidagilarni ajratib oling (agar aytilgan bo'lsa):
 - property_type: "apartment"/"house"/"commercial"/null
 - purchase_timeline: "urgent"/"1-3months"/"3-6months"/"just_looking"/null
 - payment_method: "cash"/"mortgage"/"installment"/null
+- client_name: mijozning ismi, agar suhbatda aytilgan bo'lsa (null yoki "Sardor")
+- client_gender: "male"/"female"/null (ismdan yoki murojaatdan aniqlanadi)
+- promo_code: agar assistant SUHROB-XXXX ko'rinishidagi promokod bergan bo'lsa,
+  o'sha kodni qaytaring (null yoki "SUHROB-7K4F"). Yangi kod O'YLAB TOPMANG.
 
 Shuningdek qualification_score hisoblang (0-100):
 - +30: byudjet aniq ko'rsatilgan
@@ -171,6 +177,9 @@ Faqat JSON qaytaring, boshqa hech narsa:
   "property_type": null,
   "purchase_timeline": null,
   "payment_method": null,
+  "client_name": null,
+  "client_gender": null,
+  "promo_code": null,
   "qualification_score": 0,
   "summary": ""
 }}"""
@@ -187,7 +196,9 @@ Faqat JSON qaytaring, boshqa hech narsa:
         "budget_min_usd": None, "budget_max_usd": None,
         "preferred_districts": [], "preferred_rooms": [],
         "property_type": None, "purchase_timeline": None,
-        "payment_method": None, "qualification_score": 0,
+        "payment_method": None,
+        "client_name": None, "client_gender": None, "promo_code": None,
+        "qualification_score": 0,
         "summary": "",
     }
 
@@ -278,60 +289,146 @@ def generate_property_title(data: dict) -> str:
     return " — ".join(parts)
 
 
-# ─── Smart/Fast model routing ────────────────────────────────────────────────
+# ─── Модель ──────────────────────────────────────────────────────────────────
+# Раньше здесь было ДВЕ модели с роутингом, причём имена были перепутаны:
+# "SMART" (Haiku) включался на СЛОЖНЫХ диалогах, а сильная модель — на
+# простых. Чем глубже воронка, тем хуже работал бот, плюс характер менялся
+# посреди разговора. Теперь одна модель на весь диалог.
+#
+# Haiku 4.5 выбран потому, что он дешевле Gemini Flash, лучше следует
+# длинному промпту и поддерживает явное кэширование (см. chat_with_client).
+MAIN_MODEL = "anthropic/claude-haiku-4-5"
 
-FAST_MODEL = "google/gemini-2.5-flash"
-SMART_MODEL = "google/gemini-2.5-flash"
-
-_DISTRICTS = [
-    "mirzo ulug'bek", "yunusobod", "chilonzor", "yashnobod",
-    "sergeli", "yakkasaroy", "mirobod", "shayxontohur",
-    "vokzal", "register", "lola", "gagarin",
-    "samarqand", "kattaqo'rg'on", "urgut", "bulungur",
-]
-
-
-def is_complex(message: str, history_len: int) -> bool:
-    if history_len > 10:
-        return True
-    if len(message) > 100:
-        return True
-    simple_words = ["narxi", "qancha", "xona", "manzil", "qavat", "maydon"]
-    if any(w in message.lower() for w in simple_words) and len(message) < 50:
-        return False
-    return False
+# Оставлены для обратной совместимости — на них могут ссылаться другие модули
+FAST_MODEL = MAIN_MODEL
+SMART_MODEL = MAIN_MODEL
 
 
-def extract_district(message: str, history: list) -> str | None:
-    text = message.lower()
-    for d in _DISTRICTS:
-        if d in text:
-            return d.title()
+# ─── Районы: берём РЕАЛЬНЫЕ значения из базы ─────────────────────────────────
+# Агент при добавлении объекта сам указывает район, комнаты и цену — по ним
+# построен индекс ix_properties_search, и именно они являются источником
+# истины для поиска. Поэтому не выдумываем свой список названий, а
+# подтягиваем то, что реально лежит в location_district.
+
+_CYR_TO_LAT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
+    "ж": "j", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "x", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sh",
+    "ъ": "", "ы": "i", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    "ў": "o", "қ": "q", "ғ": "g", "ҳ": "h",
+}
+
+
+def _normalize(text: str) -> str:
+    """Кириллица -> латиница, без апострофов и регистра.
+
+    Клиент пишет "Гагарин", агент в базе — "Gagarin", кто-то ещё
+    "Bogishamol" без апострофа. Без нормализации фильтр по району молча
+    не срабатывал, запрос уходил без условия, и база отдавала случайные
+    объекты — отсюда были промахи с Мотридом вместо Гагарина.
+    """
+    out = []
+    for ch in text.lower():
+        out.append(_CYR_TO_LAT.get(ch, ch))
+    return "".join(out).replace("'", "").replace("`", "").replace("ʻ", "")
+
+
+# Кэш списка районов: (время загрузки, {нормализованное: как_в_базе})
+_districts_cache: tuple[float, dict[str, str]] = (0.0, {})
+_DISTRICTS_TTL = 600  # 10 минут — новые районы появляются нечасто
+
+
+async def load_districts(company_id: int, session) -> dict[str, str]:
+    """Тянет из базы уникальные районы компании. Результат кэшируется."""
+    global _districts_cache
+    now = time.time()
+    cached_at, cached = _districts_cache
+    if cached and now - cached_at < _DISTRICTS_TTL:
+        return cached
+
+    from sqlalchemy import select
+    from src.db.models import Property, PropertyStatus
+
+    rows = await session.execute(
+        select(Property.location_district)
+        .where(
+            Property.company_id == company_id,
+            Property.status == PropertyStatus.active,
+        )
+        .distinct()
+    )
+    mapping: dict[str, str] = {}
+    for (name,) in rows:
+        if name and name.strip():
+            mapping[_normalize(name.strip())] = name.strip()
+
+    _districts_cache = (now, mapping)
+    return mapping
+
+
+async def extract_district(
+    message: str, history: list, company_id: int, session
+) -> str | None:
+    """
+    Ищет район в сообщении, сверяясь с реальными значениями из базы.
+    Сначала текущее сообщение, потом история клиента.
+    """
+    districts = await load_districts(company_id, session)
+    if not districts:
+        return None
+
+    # Длинные названия проверяем первыми, иначе "Amir Temur" перебьётся
+    # каким-нибудь коротким совпадением
+    keys = sorted(districts, key=len, reverse=True)
+
+    def _find(text: str) -> str | None:
+        norm = _normalize(text)
+        for key in keys:
+            if key and key in norm:
+                return districts[key]
+        return None
+
+    found = _find(message)
+    if found:
+        return found
+
     for msg in reversed(history):
         if msg.get("role") == "user":
-            t = msg.get("content", "").lower()
-            for d in _DISTRICTS:
-                if d in t:
-                    return d.title()
+            found = _find(msg.get("content", ""))
+            if found:
+                return found
     return None
 
 
+def is_complex(message: str, history_len: int) -> bool:
+    """
+    Утилита для логов/аналитики. ВЫБОР МОДЕЛИ БОЛЬШЕ НЕ ЗАВИСИТ от неё —
+    модель одна на весь диалог.
+    """
+    return history_len > 10 or len(message) > 100
+
+
 def extract_price(message: str, history: list) -> float | None:
-    patterns = [
-        r"(\d+)\s*ming",
-        r"(\d+)k\b",
-        r"\$(\d[\d,]+)",
-        r"(\d{4,6})",
-    ]
     text = message.lower().replace(",", "")
-    for p in patterns:
-        m = re.search(p, text)
-        if m:
-            val = float(m.group(1).replace(",", ""))
-            if "ming" in text or "k" in text:
-                val *= 1000
-            if 5000 < val < 2_000_000:
-                return val
+
+    # Явные "ming" / "50k" — умножаем на 1000
+    m = re.search(r"(\d+)\s*ming", text) or re.search(r"(\d+)\s*k\b", text)
+    if m:
+        val = float(m.group(1)) * 1000
+        if 5000 < val < 2_000_000:
+            return val
+
+    # Просто число: $60000 или 60000.
+    # ВАЖНО: раньше здесь стояла проверка `if "k" in text` — она умножала
+    # на 1000 из-за буквы "k" в обычных словах ("kerak", "kvartira"),
+    # и 45000 превращалось в 45 миллионов. Фильтр по цене отваливался.
+    m = re.search(r"\$\s*(\d+)", text) or re.search(r"\b(\d{4,6})\b", text)
+    if m:
+        val = float(m.group(1))
+        if 5000 < val < 2_000_000:
+            return val
+
     return None
 
 
@@ -340,32 +437,6 @@ def extract_rooms(message: str, history: list) -> int | None:
     if m:
         return int(m.group(1))
     return None
-
-
-_PTYPE_UZ = {"apartment": "Kvartira", "house": "Hovli", "commercial": "Tijorat"}
-
-
-def _property_context_entry(p, text_limit: int = 450) -> str:
-    """
-    Одна запись объекта для промпта: СНАЧАЛА структурированные факты
-    (тип, район, комнаты, этаж, площадь, ЦЕНА), потом кусок описания.
-    Без этой строки AI видел только сырой текст и путал цены/районы.
-    """
-    ptype = _PTYPE_UZ.get(
-        getattr(p.property_type, "value", str(p.property_type)), "Uy"
-    )
-    facts = [ptype, p.location_district, f"{p.rooms} xona"]
-    if p.floor:
-        facts.append(f"{p.floor}/{p.total_floors or '?'}-qavat")
-    if p.area_sqm:
-        facts.append(f"{float(p.area_sqm):g} m²")
-    facts.append(f"NARX: ${int(p.price_usd):,}")
-    header = f"CARD_ID:{p.id} | " + " | ".join(str(f) for f in facts)
-
-    text = (p.custom_text or p.description or p.title or "").strip()
-    if text:
-        return f"{header}\n{text[:text_limit]}"
-    return header
 
 
 async def build_properties_context(
@@ -377,12 +448,11 @@ async def build_properties_context(
     property_id: int | None = None,
 ) -> str:
 
-    from sqlalchemy import select, func as sa_func
+    from sqlalchemy import select, or_
     from src.db.models import Property, PropertyStatus
 
-    # конкретная карточка
+    # ── конкретная карточка ──────────────────────────────────────────────
     if property_id:
-
         selected = (
             await session.execute(
                 select(Property).where(
@@ -394,98 +464,97 @@ async def build_properties_context(
         ).scalar_one_or_none()
 
         if selected:
-
+            text = (
+                selected.custom_text
+                or selected.description
+                or selected.title
+                or ""
+            )
             return (
                 "Tanlangan obyekt konteksti:\n\n"
-                + _property_context_entry(selected, text_limit=900)
-                + "\n\nMijoz aynan shu obyekt haqida so'rayapti. "
-                "Faqat shu ma'lumotlardan foydalanib javob ber."
+                f"CARD_ID:{selected.id} | Tuman: {selected.location_district} | "
+                f"Manzil: {selected.location_address or '—'} | "
+                f"{selected.rooms} xona | ${selected.price_usd:,.0f}\n"
+                f"{text}\n\n"
+                "Mijoz aynan shu obyekt haqida so'rayapti. "
+                "Tayyor tavsifdan foydalanib javob bering."
             )
 
-    base_where = (
+    # ── поиск вариантов ──────────────────────────────────────────────────
+    q = select(Property).where(
         Property.company_id == company_id,
         Property.status == PropertyStatus.active,
     )
 
-    # Итог по базе: без общего количества AI не может честно ответить
-    # на "nechta uy bor?" и начинает выдумывать.
-    total = (
-        await session.execute(
-            select(sa_func.count()).select_from(Property).where(*base_where)
-        )
-    ).scalar() or 0
-
-    if not total:
-        return (
-            "Bazada hozircha FAOL OBYEKT YO'Q.\n"
-            "Mijozga halol ayt: hozircha variant yo'q. Telefon raqamini so'ra — "
-            "yangi variant chiqishi bilan agent bog'lanadi. Hech narsa o'ylab topma."
-        )
-
-    district_rows = (
-        await session.execute(
-            select(Property.location_district, sa_func.count())
-            .where(*base_where)
-            .group_by(Property.location_district)
-        )
-    ).all()
-    stats = ", ".join(f"{d} — {c} ta" for d, c in district_rows)
-
-    # поиск вариантов по фильтрам из сообщения клиента
-    q = select(Property).where(*base_where)
-    filters_applied = False
     if district:
-        q = q.where(Property.location_district.ilike(f"%{district}%"))
-        filters_applied = True
+        # Ищем и в районе, и в адресе: "Gagarin" в Самарканде — это улица,
+        # в location_district её может не быть вовсе
+        q = q.where(or_(
+            Property.location_district.ilike(f"%{district}%"),
+            Property.location_address.ilike(f"%{district}%"),
+        ))
     if price_max:
         q = q.where(Property.price_usd <= price_max)
-        filters_applied = True
     if rooms:
         q = q.where(Property.rooms == rooms)
-        filters_applied = True
 
-    props = list(
-        (await session.execute(q.order_by(Property.created_at.desc()).limit(5))).scalars()
-    )
+    result = await session.execute(q.limit(3))
+    props = list(result.scalars())
 
-    note = ""
-    if not props and filters_applied:
-        # Раньше здесь возвращалось "mos uy yo'q" БЕЗ данных — AI оставался
-        # без базы и придумывал дома. Теперь показываем ближайшие реальные
-        # варианты и прямо говорим, что точного совпадения нет.
-        note = (
-            "DIQQAT: mijoz so'ragan parametrlarga ANIQ mos uy topilmadi. "
-            "Quyidagilar — bazadagi yaqin variantlar. Mijozga buni halol ayt "
-            "va yaqin variantni taklif qil.\n\n"
+    if not props:
+        if district:
+            # Явно запрещаем модели подсовывать объекты из другого района
+            return (
+                f"DIQQAT: {district} bo'yicha mos uy TOPILMADI.\n"
+                f"Boshqa joydagi uyni {district} deb KO'RSATMA — bu yolg'on.\n"
+                "Mijozga halol ayt: shu joyda hozir yo'q, va boshqa tuman taklif qil."
+            )
+        return "Hozircha bu parametrlarda mos uy yo'q."
+
+    lines = []
+    for p in props:
+        text = (p.custom_text or p.description or p.title or "")
+        # Структурные поля идут ПЕРВЫМИ и отдельно от свободного текста.
+        # Раньше в контекст уходил только custom_text, а адрес лежал внутри
+        # него глубоко — при обрезке модель теряла район и выбирала карточки
+        # вслепую. Теперь обрезка описания на это не влияет.
+        lines.append(
+            f"CARD_ID:{p.id} | Tuman: {p.location_district} | "
+            f"Manzil: {p.location_address or '—'} | "
+            f"{p.rooms} xona | ${p.price_usd:,.0f}\n"
+            f"{text[:300]}"
         )
-        props = list(
-            (
-                await session.execute(
-                    select(Property)
-                    .where(*base_where)
-                    .order_by(Property.created_at.desc())
-                    .limit(5)
-                )
-            ).scalars()
-        )
 
-    entries = "\n\n---\n\n".join(_property_context_entry(p) for p in props)
+    header = "Topilgan obyektlar"
+    if district:
+        header = f"Topilgan obyektlar ({district} bo'yicha)"
 
     return (
-        f"Bazada jami {total} ta faol obyekt. Tumanlar kesimida: {stats}.\n"
-        "('Nechta uy bor?' turidagi savollarga AYNAN shu raqamlar bilan javob ber.)\n\n"
-        + note
-        + "Eng mos obyektlar (har birida CARD_ID, aniq NARX va parametrlar):\n\n"
-        + entries
-        + "\n\nQAT'IY QOIDA: faqat shu ro'yxatdagi CARD_ID raqamlarini [CARD:ID] "
-        "sifatida ishlat. Ro'yxatda YO'Q uy, narx yoki manzilni aytish TAQIQLANADI."
+        f"{header}. FAQAT shu ro'yxatdagi CARD_ID larni ishlat:\n\n"
+        + "\n\n---\n\n".join(lines)
     )
 
-async def format_client_profile(profile: dict) -> str:
 
+async def format_client_profile(profile: dict) -> str:
     if not profile:
-        return "Yangi mijoz, ma'lumot yo'q."
+        return "Yangi mijoz. Ism va jins NOMA'LUM — avval tanishib ol."
     parts = []
+
+    # ИМЯ, ПОЛ, ПРОМОКОД — без них новый промпт не работает: бот заново
+    # спрашивает имя и генерирует новый промокод каждый раз.
+    if profile.get("client_name"):
+        parts.append(f"Ismi: {profile['client_name']}")
+    if profile.get("client_gender"):
+        gender_uz = {"male": "erkak", "female": "ayol"}.get(
+            profile["client_gender"], profile["client_gender"]
+        )
+        parts.append(f"Jinsi: {gender_uz}")
+    if profile.get("promo_code"):
+        parts.append(
+            f"BERILGAN PROMOKOD: {profile['promo_code']} "
+            "(YANGI KOD YARATMA — faqat shuni ishlat)"
+        )
+
     if profile.get("budget_min_usd"):
         parts.append(f"Byudjet: ${profile['budget_min_usd']:,}–${profile.get('budget_max_usd') or '?'}")
     if profile.get("preferred_districts"):
@@ -496,6 +565,10 @@ async def format_client_profile(profile: dict) -> str:
         parts.append(f"To'lov: {profile['payment_method']}")
     if profile.get("purchase_timeline"):
         parts.append(f"Muddat: {profile['purchase_timeline']}")
+
+    if not profile.get("client_name"):
+        parts.append("Ism hali NOMA'LUM — avval tanishib ol")
+
     return " | ".join(parts) if parts else "Parametrlar aniqlanmagan."
 
 
@@ -532,11 +605,13 @@ async def chat_with_client(
     session,
     property_id: int | None = None,
 ) -> str:
-    """Fast model (Gemini Flash) для простых вопросов, Smart model (Haiku) для сложных."""
+    """Основной диалог с клиентом. Одна модель (MAIN_MODEL) на весь разговор."""
     import httpx
     from src.services.ai_prompts import SYSTEM_PROMPT
 
-    district = extract_district(user_message, conversation_history)
+    district = await extract_district(
+        user_message, conversation_history, company_id, session
+    )
     price_max = extract_price(user_message, conversation_history)
     rooms = extract_rooms(user_message, conversation_history)
 
@@ -551,13 +626,39 @@ async def chat_with_client(
     profile_text = await format_client_profile(client_profile)
     agents_text = await format_agents_contacts(company_id, session)
 
-    system = SYSTEM_PROMPT.format(
-        properties_context=properties,
-        client_profile=profile_text,
-        agents_contacts=agents_text,
-    )
+    # ── Кэширование промпта ──────────────────────────────────────────────
+    # Системный промпт (~4000 токенов персонажа, правил и примеров)
+    # одинаков во всех запросах, но отправляется заново каждый раз — это
+    # и есть основная статья расходов. Режем его надвое: статику помечаем
+    # cache_control (повторные чтения ~в 10 раз дешевле), а динамику
+    # (объекты, профиль, агенты) шлём как есть — она меняется постоянно.
+    _MARKER = "━━━━━━━━━━━━━━━━━━━━━━\nMAVJUD UYLAR"
+    if _MARKER in SYSTEM_PROMPT:
+        static_part, _tail = SYSTEM_PROMPT.split(_MARKER, 1)
+        dynamic_part = (_MARKER + _tail).format(
+            properties_context=properties,
+            client_profile=profile_text,
+            agents_contacts=agents_text,
+        )
+    else:
+        # Промпт отредактировали и маркер пропал — работаем без кэша
+        static_part = ""
+        dynamic_part = SYSTEM_PROMPT.format(
+            properties_context=properties,
+            client_profile=profile_text,
+            agents_contacts=agents_text,
+        )
 
-    model = SMART_MODEL if is_complex(user_message, len(conversation_history)) else FAST_MODEL
+    system_blocks = []
+    if static_part:
+        system_blocks.append({
+            "type": "text",
+            "text": static_part,
+            "cache_control": {"type": "ephemeral"},
+        })
+    system_blocks.append({"type": "text", "text": dynamic_part})
+
+    model = MAIN_MODEL
 
     try:
         async with httpx.AsyncClient(timeout=30) as http:
@@ -571,17 +672,28 @@ async def chat_with_client(
                 },
                 json={
                     "model": model,
-                    "temperature": 0.3,
-                    "max_tokens": 600,
+                    # 0.3 было слишком низко — модель копировала примеры из
+                    # промпта дословно. 0.6 — компромисс: живой текст, но
+                    # аккуратный выбор CARD_ID.
+                    "temperature": 0.6,
+                    "max_tokens": 700,
+                    # Без этого Gemini тратил почти весь лимит на внутренние
+                    # рассуждения, и ответ обрывался на полуслове
+                    "reasoning": {"enabled": False},
                     "messages": [
-                        {"role": "system", "content": system},
-                        *conversation_history[-10:],
+                        {"role": "system", "content": system_blocks},
+                        *conversation_history[-12:],
                         {"role": "user", "content": user_message},
                     ],
                 },
             )
             data = response.json()
-        return data["choices"][0]["message"]["content"]
+
+        choice = data["choices"][0]
+        if choice.get("finish_reason") == "length":
+            logger.warning("ai_reply_truncated", model=model,
+                           usage=data.get("usage"))
+        return choice["message"]["content"]
     except Exception as exc:
         logger.warning("chat_with_client_failed", model=model, error=str(exc))
         return "Kechirasiz, hozir texnik nosozlik bor. Iltimos, qaytadan urinib ko'ring."
