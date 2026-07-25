@@ -66,7 +66,7 @@ MAX_PHOTOS_PER_PROPERTY = 4
 
 # Версия моста — видна в GET /health. По ней проверяем, что Railway
 # реально запустил свежий код, а не кэшированную сборку.
-BRIDGE_VERSION = "2026-07-25-photo-order-v2"
+BRIDGE_VERSION = "2026-07-25-photos-first-v3"
 
 # Максимальная длина одного текстового сообщения в Instagram DM.
 IG_TEXT_LIMIT = 950
@@ -355,24 +355,21 @@ async def build_property_messages(session, company_id: int | None,
 
     groups: list[list[dict]] = []
     for prop in props:
-        card: list[dict] = []
-
-        # 1. Описание — ПЕРВЫМ сообщением карточки
-        caption = strip_html(format_property_card(prop, rate))
-        card.append(mc_text(caption))
-
-        # 2. Фото — следом (видео пропускаем — Instagram-канал его не
+        # Фото объекта (видео пропускаем — Instagram-канал его не
         # поддерживает), берём первые MAX_PHOTOS_PER_PROPERTY штук.
         photos = [
             m for m in (prop.media or [])
             if getattr(m.file_type, "value", m.file_type) == FileType.photo.value
         ][:MAX_PHOTOS_PER_PROPERTY]
 
+        # 1. ФОТО — отдельной группой, уходят отдельным вызовом API
         if photos and PUBLIC_BASE_URL:
-            for photo in photos:
+            groups.append([
                 # .jpg в конце обязателен: Instagram/ManyChat может не
                 # принять URL картинки без расширения файла
-                card.append(mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg"))
+                mc_image(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg")
+                for photo in photos
+            ])
         else:
             # Явно логируем причину отсутствия фото — либо у объекта в базе
             # нет ни одной фотографии (только видео/ничего), либо не задан
@@ -384,7 +381,12 @@ async def build_property_messages(session, company_id: int | None,
                 has_public_base_url=bool(PUBLIC_BASE_URL),
             )
 
-        groups.append(card)
+        # 2. ОПИСАНИЕ — следующей отдельной группой. Между группами стоит
+        # пауза (после группы с фото — увеличенная), поэтому описание
+        # приходит ПОСЛЕ фото своего объекта и не убегает к соседней
+        # карточке. Порядок как в Telegram: фото → текст.
+        caption = strip_html(format_property_card(prop, rate))
+        groups.append([mc_text(caption)])
 
     # ПРЕДПРОГРЕВ: скачиваем все фото из Telegram в кэш ДО отправки.
     # Instagram заберёт их с нашего сервера мгновенно — фото не будут
