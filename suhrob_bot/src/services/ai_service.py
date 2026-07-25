@@ -280,8 +280,8 @@ def generate_property_title(data: dict) -> str:
 
 # ─── Smart/Fast model routing ────────────────────────────────────────────────
 
-FAST_MODEL = "inclusionai/ling-3.0-flash:free"
-SMART_MODEL = "inclusionai/ling-3.0-flash:free"
+FAST_MODEL = "google/gemini-3.6-flash"
+SMART_MODEL = "google/gemini-3.6-flash"
 
 _DISTRICTS = [
     "mirzo ulug'bek", "yunusobod", "chilonzor", "yashnobod",
