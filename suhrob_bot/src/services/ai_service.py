@@ -151,6 +151,10 @@ Suhbatdan quyidagilarni ajratib oling (agar aytilgan bo'lsa):
 - preferred_rooms: afzal xonalar soni ([2, 3] kabi)
 - property_type: "apartment"/"house"/"commercial"/null
 - purchase_timeline: "urgent"/"1-3months"/"3-6months"/"just_looking"/null
+- client_name: mijozning ismi, agar suhbatda aytilgan bo'lsa (null yoki "Sardor")
+- client_gender: "male"/"female"/null (ismdan yoki murojaatdan aniqlanadi)
+- promo_code: agar assistant SUHROB-XXXX ko'rinishidagi promokod bergan bo'lsa,
+  o'sha kodni qaytar (null yoki "SUHROB-7K4F"). Yangi kod O'YLAB TOPMA.
 - payment_method: "cash"/"mortgage"/"installment"/null
 
 Shuningdek qualification_score hisoblang (0-100):
@@ -171,6 +175,9 @@ Faqat JSON qaytaring, boshqa hech narsa:
   "property_type": null,
   "purchase_timeline": null,
   "payment_method": null,
+  "client_name": null,
+  "client_gender": null,
+  "promo_code": null,
   "qualification_score": 0,
   "summary": ""
 }}"""
@@ -188,6 +195,7 @@ Faqat JSON qaytaring, boshqa hech narsa:
         "preferred_districts": [], "preferred_rooms": [],
         "property_type": None, "purchase_timeline": None,
         "payment_method": None, "qualification_score": 0,
+        "client_name": None, "client_gender": None, "promo_code": None,
         "summary": "",
     }
 
@@ -278,10 +286,17 @@ def generate_property_title(data: dict) -> str:
     return " — ".join(parts)
 
 
-# ─── Smart/Fast model routing ────────────────────────────────────────────────
+# ─── Модель ──────────────────────────────────────────────────────────────────
+# ВАЖНО: раньше здесь было ДВЕ модели и роутинг между ними, причём с
+# перепутанными именами: "SMART" (Haiku, слабее) включался на СЛОЖНЫХ
+# диалогах, а сильная модель — на простых. То есть чем глубже воронка,
+# тем хуже работал бот, плюс характер менялся посреди разговора.
+# Теперь одна модель на весь диалог — стиль и логика воронки стабильны.
+MAIN_MODEL = "anthropic/claude-sonnet-4-6"
 
-FAST_MODEL = "google/gemini-3.6-flash"
-SMART_MODEL = "google/gemini-3.6-flash"
+# Оставлены для обратной совместимости (на них могут ссылаться другие модули)
+FAST_MODEL = MAIN_MODEL
+SMART_MODEL = MAIN_MODEL
 
 _DISTRICTS = [
     "mirzo ulug'bek", "yunusobod", "chilonzor", "yashnobod",
@@ -292,14 +307,11 @@ _DISTRICTS = [
 
 
 def is_complex(message: str, history_len: int) -> bool:
-    if history_len > 10:
-        return True
-    if len(message) > 100:
-        return True
-    simple_words = ["narxi", "qancha", "xona", "manzil", "qavat", "maydon"]
-    if any(w in message.lower() for w in simple_words) and len(message) < 50:
-        return False
-    return False
+    """
+    Оставлена как утилита (может пригодиться для логов/аналитики).
+    ВЫБОР МОДЕЛИ БОЛЬШЕ НЕ ЗАВИСИТ от неё — модель одна на весь диалог.
+    """
+    return history_len > 10 or len(message) > 100
 
 
 def extract_district(message: str, history: list) -> str | None:
@@ -350,13 +362,10 @@ async def build_properties_context(
     session,
     property_id: int | None = None,
 ) -> str:
-
     from sqlalchemy import select
     from src.db.models import Property, PropertyStatus
 
-    # конкретная карточка
     if property_id:
-
         selected = (
             await session.execute(
                 select(Property).where(
@@ -366,88 +375,69 @@ async def build_properties_context(
                 )
             )
         ).scalar_one_or_none()
-
         if selected:
-
-            text = (
-                selected.custom_text
-                or selected.description
-                or selected.title
-                or ""
-            )
-
             return (
-                "Tanlangan obyekt konteksti:\n\n"
-                f"CARD_ID:{selected.id}\n"
-                f"{text}\n\n"
+                "Tanlangan obyekt konteksti:\n"
+                f"CARD_ID:{selected.id} | {selected.title} | {selected.property_type.value} | "
+                f"{selected.location_district} | {selected.location_address or ''} | "
+                f"{selected.rooms} xona | {selected.floor}/{selected.total_floors} qavat | "
+                f"{selected.area_sqm} m² | ${selected.price_usd:,.0f} | "
+                f"{selected.description or ''}\n\n"
                 "Mijoz aynan shu obyekt haqida so'rayapti. "
-                "Tayyor tavsifdan foydalanib javob bering."
+                "Faqat shu ma'lumotlarga tayaning; yetishmaydigan ma'lumot uchun agentga ulashni taklif qiling."
             )
 
-
-    # поиск вариантов
     q = select(Property).where(
         Property.company_id == company_id,
         Property.status == PropertyStatus.active,
     )
-
     if district:
-        q = q.where(
-            Property.location_district.ilike(f"%{district}%")
-        )
-
+        q = q.where(Property.location_district.ilike(f"%{district}%"))
     if price_max:
-        q = q.where(
-            Property.price_usd <= price_max
-        )
-
+        q = q.where(Property.price_usd <= price_max)
     if rooms:
-        q = q.where(
-            Property.rooms == rooms
-        )
+        q = q.where(Property.rooms == rooms)
 
-
-    result = await session.execute(
-        q.limit(5)
-    )
-
+    result = await session.execute(q.limit(5))
     props = list(result.scalars())
-
 
     if not props:
         return "Hozircha bu parametrlarda mos uy yo'q."
 
-
     lines = []
-
     for p in props:
-
-        text = (
-            p.custom_text
-            or p.description
-            or p.title
-            or ""
-        )
-
         lines.append(
-            f"CARD_ID:{p.id}\n"
-            f"{text[:700]}"
+            f"CARD_ID:{p.id} | {p.property_type.value} | {p.location_district} | "
+            f"{p.location_address or ''} | "
+            f"{p.rooms} xona | {p.floor}/{p.total_floors} qavat | "
+            f"{p.area_sqm} m² | ${p.price_usd:,.0f} | "
+            f"{p.description[:120] if p.description else ''}"
         )
+    return "\n".join(lines)
 
-
-    return (
-        "Topilgan obyektlar:\n\n"
-        +
-        "\n\n---\n\n".join(lines)
-    )
 
 async def format_client_profile(profile: dict) -> str:
-
     if not profile:
-        return "Yangi mijoz, ma'lumot yo'q."
+        return "Yangi mijoz. Ism va jins NOMA'LUM — avval tanishib ol."
     parts = []
+
+    # ИМЯ, ПОЛ, ПРОМОКОД — критично для нового промпта: без них бот
+    # заново спрашивает имя и генерирует новый промокод каждый раз.
+    if profile.get("client_name"):
+        parts.append(f"Ismi: {profile['client_name']}")
+    if profile.get("client_gender"):
+        gender_uz = {"male": "erkak", "female": "ayol"}.get(
+            profile["client_gender"], profile["client_gender"]
+        )
+        parts.append(f"Jinsi: {gender_uz}")
+    if profile.get("promo_code"):
+        parts.append(
+            f"BERILGAN PROMOKOD: {profile['promo_code']} "
+            "(YANGI KOD YARATMA — faqat shuni ishlat)"
+        )
+
     if profile.get("budget_min_usd"):
-        parts.append(f"Byudjet: ${profile['budget_min_usd']:,}–${profile.get('budget_max_usd') or '?'}")
+        parts.append(f"Byudjet: ${profile['budget_min_usd']:,}–${profile.get('budget_max_usd', '?')}")
     if profile.get("preferred_districts"):
         parts.append(f"Tuman: {', '.join(profile['preferred_districts'])}")
     if profile.get("preferred_rooms"):
@@ -456,6 +446,10 @@ async def format_client_profile(profile: dict) -> str:
         parts.append(f"To'lov: {profile['payment_method']}")
     if profile.get("purchase_timeline"):
         parts.append(f"Muddat: {profile['purchase_timeline']}")
+
+    if not profile.get("client_name"):
+        parts.append("Ism hali NOMA'LUM — avval tanishib ol")
+
     return " | ".join(parts) if parts else "Parametrlar aniqlanmagan."
 
 
@@ -492,7 +486,7 @@ async def chat_with_client(
     session,
     property_id: int | None = None,
 ) -> str:
-    """Fast model (Gemini Flash) для простых вопросов, Smart model (Haiku) для сложных."""
+    """Основной диалог с клиентом. Одна модель (MAIN_MODEL) на весь разговор."""
     import httpx
     from src.services.ai_prompts import SYSTEM_PROMPT
 
@@ -517,7 +511,7 @@ async def chat_with_client(
         agents_contacts=agents_text,
     )
 
-    model = SMART_MODEL if is_complex(user_message, len(conversation_history)) else FAST_MODEL
+    model = MAIN_MODEL
 
     try:
         async with httpx.AsyncClient(timeout=30) as http:
@@ -531,11 +525,17 @@ async def chat_with_client(
                 },
                 json={
                     "model": model,
-                    "temperature": 0.3,
+                    # 0.3 было СЛИШКОМ НИЗКО: на такой температуре модель
+                    # копирует примеры диалогов из промпта дословно и шутит
+                    # шаблонно. Промпт требует импровизации — нужно 0.7-0.85.
+                    "temperature": 0.8,
                     "max_tokens": 600,
                     "messages": [
                         {"role": "system", "content": system},
-                        *conversation_history[-10:],
+                        # 10 было МАЛО: имя клиента и выданный промокод
+                        # выпадали из контекста, бот заново спрашивал имя
+                        # и генерировал второй код. 24 покрывает всю воронку.
+                        *conversation_history[-24:],
                         {"role": "user", "content": user_message},
                     ],
                 },
