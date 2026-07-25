@@ -342,6 +342,32 @@ def extract_rooms(message: str, history: list) -> int | None:
     return None
 
 
+_PTYPE_UZ = {"apartment": "Kvartira", "house": "Hovli", "commercial": "Tijorat"}
+
+
+def _property_context_entry(p, text_limit: int = 450) -> str:
+    """
+    Одна запись объекта для промпта: СНАЧАЛА структурированные факты
+    (тип, район, комнаты, этаж, площадь, ЦЕНА), потом кусок описания.
+    Без этой строки AI видел только сырой текст и путал цены/районы.
+    """
+    ptype = _PTYPE_UZ.get(
+        getattr(p.property_type, "value", str(p.property_type)), "Uy"
+    )
+    facts = [ptype, p.location_district, f"{p.rooms} xona"]
+    if p.floor:
+        facts.append(f"{p.floor}/{p.total_floors or '?'}-qavat")
+    if p.area_sqm:
+        facts.append(f"{float(p.area_sqm):g} m²")
+    facts.append(f"NARX: ${int(p.price_usd):,}")
+    header = f"CARD_ID:{p.id} | " + " | ".join(str(f) for f in facts)
+
+    text = (p.custom_text or p.description or p.title or "").strip()
+    if text:
+        return f"{header}\n{text[:text_limit]}"
+    return header
+
+
 async def build_properties_context(
     company_id: int,
     district: str | None,
@@ -351,7 +377,7 @@ async def build_properties_context(
     property_id: int | None = None,
 ) -> str:
 
-    from sqlalchemy import select
+    from sqlalchemy import select, func as sa_func
     from src.db.models import Property, PropertyStatus
 
     # конкретная карточка
@@ -369,76 +395,90 @@ async def build_properties_context(
 
         if selected:
 
-            text = (
-                selected.custom_text
-                or selected.description
-                or selected.title
-                or ""
-            )
-
             return (
                 "Tanlangan obyekt konteksti:\n\n"
-                f"CARD_ID:{selected.id}\n"
-                f"{text}\n\n"
-                "Mijoz aynan shu obyekt haqida so'rayapti. "
-                "Tayyor tavsifdan foydalanib javob bering."
+                + _property_context_entry(selected, text_limit=900)
+                + "\n\nMijoz aynan shu obyekt haqida so'rayapti. "
+                "Faqat shu ma'lumotlardan foydalanib javob ber."
             )
 
-
-    # поиск вариантов
-    q = select(Property).where(
+    base_where = (
         Property.company_id == company_id,
         Property.status == PropertyStatus.active,
     )
 
+    # Итог по базе: без общего количества AI не может честно ответить
+    # на "nechta uy bor?" и начинает выдумывать.
+    total = (
+        await session.execute(
+            select(sa_func.count()).select_from(Property).where(*base_where)
+        )
+    ).scalar() or 0
+
+    if not total:
+        return (
+            "Bazada hozircha FAOL OBYEKT YO'Q.\n"
+            "Mijozga halol ayt: hozircha variant yo'q. Telefon raqamini so'ra — "
+            "yangi variant chiqishi bilan agent bog'lanadi. Hech narsa o'ylab topma."
+        )
+
+    district_rows = (
+        await session.execute(
+            select(Property.location_district, sa_func.count())
+            .where(*base_where)
+            .group_by(Property.location_district)
+        )
+    ).all()
+    stats = ", ".join(f"{d} — {c} ta" for d, c in district_rows)
+
+    # поиск вариантов по фильтрам из сообщения клиента
+    q = select(Property).where(*base_where)
+    filters_applied = False
     if district:
-        q = q.where(
-            Property.location_district.ilike(f"%{district}%")
-        )
-
+        q = q.where(Property.location_district.ilike(f"%{district}%"))
+        filters_applied = True
     if price_max:
-        q = q.where(
-            Property.price_usd <= price_max
-        )
-
+        q = q.where(Property.price_usd <= price_max)
+        filters_applied = True
     if rooms:
-        q = q.where(
-            Property.rooms == rooms
-        )
+        q = q.where(Property.rooms == rooms)
+        filters_applied = True
 
-
-    result = await session.execute(
-        q.limit(5)
+    props = list(
+        (await session.execute(q.order_by(Property.created_at.desc()).limit(5))).scalars()
     )
 
-    props = list(result.scalars())
-
-
-    if not props:
-        return "Hozircha bu parametrlarda mos uy yo'q."
-
-
-    lines = []
-
-    for p in props:
-
-        text = (
-            p.custom_text
-            or p.description
-            or p.title
-            or ""
+    note = ""
+    if not props and filters_applied:
+        # Раньше здесь возвращалось "mos uy yo'q" БЕЗ данных — AI оставался
+        # без базы и придумывал дома. Теперь показываем ближайшие реальные
+        # варианты и прямо говорим, что точного совпадения нет.
+        note = (
+            "DIQQAT: mijoz so'ragan parametrlarga ANIQ mos uy topilmadi. "
+            "Quyidagilar — bazadagi yaqin variantlar. Mijozga buni halol ayt "
+            "va yaqin variantni taklif qil.\n\n"
+        )
+        props = list(
+            (
+                await session.execute(
+                    select(Property)
+                    .where(*base_where)
+                    .order_by(Property.created_at.desc())
+                    .limit(5)
+                )
+            ).scalars()
         )
 
-        lines.append(
-            f"CARD_ID:{p.id}\n"
-            f"{text[:700]}"
-        )
-
+    entries = "\n\n---\n\n".join(_property_context_entry(p) for p in props)
 
     return (
-        "Topilgan obyektlar:\n\n"
-        +
-        "\n\n---\n\n".join(lines)
+        f"Bazada jami {total} ta faol obyekt. Tumanlar kesimida: {stats}.\n"
+        "('Nechta uy bor?' turidagi savollarga AYNAN shu raqamlar bilan javob ber.)\n\n"
+        + note
+        + "Eng mos obyektlar (har birida CARD_ID, aniq NARX va parametrlar):\n\n"
+        + entries
+        + "\n\nQAT'IY QOIDA: faqat shu ro'yxatdagi CARD_ID raqamlarini [CARD:ID] "
+        "sifatida ishlat. Ro'yxatda YO'Q uy, narx yoki manzilni aytish TAQIQLANADI."
     )
 
 async def format_client_profile(profile: dict) -> str:

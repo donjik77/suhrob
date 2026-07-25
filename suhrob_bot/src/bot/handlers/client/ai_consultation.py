@@ -501,17 +501,26 @@ async def _maybe_assign_hot_lead(
             agent = await session.get(User, prop.agent_id)
 
     if agent is None:
-        agent = (
-            await session.execute(
-                _select(User).where(
-                    User.company_id == client.company_id,
-                    User.role == UR.agent,
-                    User.is_blocked == False,
-                ).limit(1)
-            )
-        ).scalar_one_or_none()
+        # Сначала ищем агента; если в компании его нет (частый случай —
+        # только директор), лид уходит директору, а не пропадает молча.
+        for role in (UR.agent, UR.director):
+            agent = (
+                await session.execute(
+                    _select(User).where(
+                        User.company_id == client.company_id,
+                        User.role == role,
+                        User.is_blocked == False,
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+            if agent:
+                break
 
     if not agent:
+        import structlog
+        structlog.get_logger().warning(
+            "hot_lead_no_recipient", client_id=client.id, company_id=client.company_id
+        )
         return
 
     if not existing:
@@ -526,30 +535,40 @@ async def _maybe_assign_hot_lead(
         )
         await session.commit()
 
+    from html import escape as _esc
+
     score = qualification.get("qualification_score", 0)
     budget_min = qualification.get("budget_min_usd")
     budget_max = qualification.get("budget_max_usd")
     budget = f"${budget_min}-${budget_max}" if budget_min and budget_max else "-"
-    districts = ", ".join(qualification.get("preferred_districts") or []) or "-"
+    districts = _esc(", ".join(qualification.get("preferred_districts") or []) or "-")
     rooms = ", ".join(str(r) for r in (qualification.get("preferred_rooms") or [])) or "-"
     phone = client_phone or client.phone or "-"
     username = f"@{client.username}" if client.username else "-"
+    is_instagram = (client.telegram_user_id or 0) < 0
+    source = "Instagram" if is_instagram else "Telegram"
 
+    # Имя/резюме экранируем: имя из Instagram может содержать < > & —
+    # без экранирования Telegram отклонит HTML и агент НЕ получит лид.
     msg = t(
         "hot_lead_notify",
-        client_name=client.full_name or client.username or "Anonim",
+        client_name=_esc(client.full_name or client.username or "Anonim"),
         score=score,
         budget=budget,
         districts=districts,
         rooms=rooms,
         timeline=qualification.get("purchase_timeline") or "-",
         payment_method=qualification.get("payment_method") or "-",
-        summary=qualification.get("summary") or "-",
+        summary=_esc(qualification.get("summary") or "-"),
     )
-    msg += f"\n\nTelefon: {phone}\nTelegram: {username}"
+    msg += f"\n\nManba: {source}\nTelefon: {phone}"
+    if not is_instagram:
+        msg += f"\nTelegram: {_esc(username)}"
 
     try:
         await bot.send_message(agent.telegram_user_id, msg, parse_mode="HTML")
-    except Exception:
+    except Exception as exc:
         import structlog
-        structlog.get_logger().warning("hot_lead_notify_failed", agent_id=agent.id)
+        structlog.get_logger().warning(
+            "hot_lead_notify_failed", agent_id=agent.id, error=str(exc)
+        )

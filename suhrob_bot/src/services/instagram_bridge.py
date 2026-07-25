@@ -29,6 +29,7 @@ from src.db.session import AsyncSessionFactory
 from src.db.models import (
     User, UserRole, Company, ClientProfile, ClientConversation,
     Property, PropertyMedia, PropertyStatus, FileType,
+    LeadAssignment, LeadStatus,
 )
 from src.db.repositories.settings_repo import SettingsRepository
 from src.utils.formatters import format_property_card
@@ -87,11 +88,48 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 # Тот же паттерн, что уже используется в Telegram-версии (favorites.py),
 # и тот же список триггеров "хочу агента", что в ai_consultation.py.
 _PHONE_RE = re.compile(r"^\+?\d[\d\s().\-]{6,}$")
+# Телефон ВНУТРИ длинного сообщения ("mening raqamim +998901234567").
+_PHONE_ANYWHERE_RE = re.compile(r"\+?\d[\d\s().\-]{7,}\d")
+# Если в сообщении речь о деньгах — цифры почти наверняка цена, не телефон.
+_CURRENCY_HINT_RE = re.compile(
+    r"(so'?m|sum|сум|dollar|дол|\$|ming|min\b|mln|million|byudjet|narx)",
+    re.IGNORECASE,
+)
 _AGENT_CONNECT_RE = re.compile(
     r"(agent|makler|rieltor|bog'?la|boglan|bog'lan|aloqa|telefon|ko'rish|korish|uchrash)",
     re.IGNORECASE,
 )
 QUALIFY_SCORE_THRESHOLD = 70
+
+# ManyChat передаёт пол ТОЛЬКО в первом сообщении (через Body фло);
+# в external_message_callback его нет. Запоминаем, чтобы AI не терял
+# пол клиента со второго сообщения (из-за этого были "jigar" девушкам).
+_contact_gender: dict[str, str] = {}
+
+
+def find_phone_in_text(text: str) -> str | None:
+    """
+    Ищет телефон и в сообщении из одного номера, и внутри фразы.
+    Возвращает нормализованный номер (+998...) или None.
+    """
+    text = (text or "").strip()
+    candidate = None
+    if _PHONE_RE.match(text):
+        candidate = text
+    elif not _CURRENCY_HINT_RE.search(text):
+        m = _PHONE_ANYWHERE_RE.search(text)
+        if m:
+            candidate = m.group()
+
+    if not candidate:
+        return None
+
+    digits = re.sub(r"\D", "", candidate)
+    if len(digits) == 9:                      # 901234567
+        digits = "998" + digits
+    if not (11 <= len(digits) <= 15):
+        return None
+    return f"+{digits}"
 
 
 def extract_property_card_ids(reply: str) -> list[int]:
@@ -575,9 +613,15 @@ async def instagram_webhook(request: web.Request) -> web.Response:
     first_name = data.get("first_name")
     gender = (data.get("gender") or "").lower()
 
-    if not contact_id or not user_message:
+    if not contact_id:
+        return web.json_response(mc_ack())
+
+    if not user_message:
+        # Сюда попадают стикеры/реакции/эмодзи, для которых ManyChat не
+        # передал текст. Раньше клиент получал холодное "Salom jigar!" —
+        # выглядело как будто бот его не слышит. Отвечаем по-человечески.
         return web.json_response(mc_response([
-            mc_text("Salom jigar! Qanaqa uy kerak, yozing 🏡")
+            mc_text("Ko'rdim 🙂 Yozib yuboring bemalol — qanday uy qiziqtiradi?")
         ]))
 
     logger.info("ig_message_in", contact=contact_id, text=user_message[:100])
@@ -597,14 +641,22 @@ async def _process_and_reply(contact_id: str, user_message: str,
     Вся тяжёлая работа — вне HTTP-запроса ManyChat:
     пользователь -> история -> AI -> карточки -> отправка через API.
     """
+    # Пол приходит только с первым сообщением — кэшируем на весь диалог
+    if gender in ("male", "female"):
+        _contact_gender[contact_id] = gender
+    else:
+        gender = _contact_gender.get(contact_id, "")
+
     # 1. Пользователь + история + профиль
     async with AsyncSessionFactory() as session:
         user = await get_or_create_ig_user(session, contact_id, first_name)
         company_id = user.company_id
 
-        # Телефон, присланный текстом — отдельная быстрая ветка без AI
-        if not user.phone and _PHONE_RE.match(user_message):
-            reply = await _handle_phone_submission(session, user, user_message)
+        # Телефон, присланный текстом (отдельным сообщением ИЛИ внутри
+        # фразы "mening raqamim +998...") — быстрая ветка без AI
+        phone_in_msg = find_phone_in_text(user_message) if not user.phone else None
+        if phone_in_msg:
+            reply = await _handle_phone_submission(session, user, phone_in_msg)
             await send_via_manychat_api(
                 contact_id, reply.get("content", {}).get("messages", [])
             )
@@ -643,12 +695,14 @@ async def _process_and_reply(contact_id: str, user_message: str,
                 "qualification_score": profile_row.qualification_score,
             }
 
-    # 2. Подсказка про пол, чтобы бот не сказал девушке "jigar"
+    # 2. Подсказка про пол, чтобы бот не сказал девушке "jigar".
+    # Конкретную форму (aka/uka/opa/singlim) выбирает промпт ПО ВОЗРАСТУ —
+    # здесь только факт пола, иначе бот лепил "aka/opa" куда попало.
     prompt_text = user_message
     if gender == "female":
-        prompt_text += "\n[Mijoz ayol — 'singlim/opa' deb murojaat qil]"
+        prompt_text += "\n[Kontekst: mijoz AYOL. Murojaatni yoshiga qarab tanla, 'jigar' dema]"
     elif gender == "male":
-        prompt_text += "\n[Mijoz erkak — 'jigar/radnoy/aka' deb murojaat qil]"
+        prompt_text += "\n[Kontekst: mijoz ERKAK. Murojaatni yoshiga qarab tanla]"
 
     # 3. Вызов AI — теперь можно ждать по-настоящему (мы вне HTTP-запроса)
     try:
@@ -689,9 +743,13 @@ async def _process_and_reply(contact_id: str, user_message: str,
 
         # 5. Быстрый детект "клиент попросил агента" — по ключевым словам.
         # Квалификация — отдельной фоновой задачей, как и раньше.
-        should_ask_phone = (
-            not user.phone and bool(_AGENT_CONNECT_RE.search(user_message))
-        )
+        wants_agent = bool(_AGENT_CONNECT_RE.search(user_message))
+        should_ask_phone = wants_agent and not user.phone
+
+        if wants_agent and user.phone:
+            # Раньше этот случай терялся: телефон уже есть, клиент просит
+            # агента — и никто не уведомлялся. Теперь лид уходит агенту.
+            asyncio.create_task(_notify_agent_with_profile(user.id))
 
         history_for_qualify = history + [
             {"role": "user", "content": user_message},
@@ -732,28 +790,18 @@ async def _qualify_in_background(user_id: int, history: list[dict]) -> None:
             await _upsert_profile(session, user_id, qualification)
     except Exception as exc:
         logger.warning("ig_qualify_bg_save_failed", user_id=user_id, error=str(exc))
+        return
+
+    # Горячий клиент (score >= 70, телефон уже есть) — как в Telegram-версии,
+    # уведомляем агента. skip_if_lead_exists защищает от спама: повторное
+    # уведомление не шлётся, пока по клиенту уже висит необработанный лид.
+    if qualification.get("qualification_score", 0) >= QUALIFY_SCORE_THRESHOLD:
+        await _notify_agent_with_profile(user_id, skip_if_lead_exists=True)
 
 
-async def _handle_phone_submission(session, user: User, phone_text: str) -> dict:
-    """
-    Клиент прислал номер телефона отдельным сообщением (без нажатия
-    какой-либо кнопки в ManyChat — просто написал текстом). Сохраняем,
-    квалифицируем по уже накопленному профилю и уведомляем агента —
-    той же функцией, что использует Telegram-версия.
-    """
-    from src.bot.handlers.client.ai_consultation import _maybe_assign_hot_lead
-
-    phone = phone_text if phone_text.startswith("+") else f"+{phone_text}"
-    user.phone = phone
-    await session.commit()
-
-    profile = (
-        await session.execute(
-            select(ClientProfile).where(ClientProfile.user_id == user.id)
-        )
-    ).scalar_one_or_none()
-
-    qualification = {
+def _profile_qualification(profile: ClientProfile | None) -> dict:
+    """Квалификация из уже накопленного профиля (для уведомления агента)."""
+    return {
         "qualification_score": (profile.qualification_score if profile else 0),
         "budget_min_usd": (profile.budget_min_usd if profile else None),
         "budget_max_usd": (profile.budget_max_usd if profile else None),
@@ -764,20 +812,105 @@ async def _handle_phone_submission(session, user: User, phone_text: str) -> dict
         "summary": ((profile.notes if profile else None) or "Instagram orqali murojaat"),
     }
 
-    bot = _get_notifier_bot(user.company_id)
+
+async def _resolve_notifier_bot(session, company_id: int | None):
+    """
+    Возвращает (bot, нужно_ли_закрыть_сессию_бота).
+
+    Раньше при пустом BotManager (например, платформа поднята на
+    fallback BOT_TOKEN) уведомление агенту МОЛЧА пропускалось.
+    Теперь в этом случае собираем временный aiogram Bot из токена
+    компании в БД (или BOT_TOKEN из окружения) — лид доходит всегда,
+    пока есть хоть один рабочий токен.
+    """
+    bot = _get_notifier_bot(company_id)
     if bot is not None:
-        try:
-            await _maybe_assign_hot_lead(
-                session, user, qualification, bot,
-                client_phone=phone, property_id=None,
+        return bot, False
+
+    token = None
+    if company_id:
+        company = await session.get(Company, company_id)
+        token = company.bot_token if company else None
+    if not token:
+        row = (
+            await session.execute(
+                select(Company).where(Company.bot_token != None).limit(1)  # noqa: E711
             )
-        except Exception as exc:
-            logger.warning("ig_lead_notify_failed", error=str(exc))
-    else:
-        logger.warning("ig_lead_notify_skipped_no_bot", user_id=user.id)
+        ).scalar_one_or_none()
+        token = row.bot_token if row else None
+    if not token:
+        import os
+        token = os.environ.get("BOT_TOKEN") or None
+    if not token:
+        return None, False
+
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    return Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML)), True
+
+
+async def _notify_agent_with_profile(user_id: int, *,
+                                     skip_if_lead_exists: bool = False) -> None:
+    """
+    Уведомляет агента о лиде по данным профиля. Безопасна для фоновых
+    задач: сама открывает сессию и глотает ошибки в лог.
+    """
+    from src.bot.handlers.client.ai_consultation import _maybe_assign_hot_lead
+
+    try:
+        async with AsyncSessionFactory() as session:
+            user = await session.get(User, user_id)
+            if not user or not user.phone:
+                return
+
+            if skip_if_lead_exists:
+                existing = (
+                    await session.execute(
+                        select(LeadAssignment).where(
+                            LeadAssignment.client_user_id == user.id,
+                            LeadAssignment.status == LeadStatus.new,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing:
+                    return
+
+            profile = (
+                await session.execute(
+                    select(ClientProfile).where(ClientProfile.user_id == user.id)
+                )
+            ).scalar_one_or_none()
+
+            bot, should_close = await _resolve_notifier_bot(session, user.company_id)
+            if bot is None:
+                logger.warning("ig_lead_notify_skipped_no_bot", user_id=user_id)
+                return
+            try:
+                await _maybe_assign_hot_lead(
+                    session, user, _profile_qualification(profile), bot,
+                    client_phone=user.phone, property_id=None,
+                )
+            finally:
+                if should_close:
+                    await bot.session.close()
+    except Exception as exc:
+        logger.warning("ig_lead_notify_failed", user_id=user_id, error=str(exc))
+
+
+async def _handle_phone_submission(session, user: User, phone: str) -> dict:
+    """
+    Клиент прислал номер телефона текстом (без кнопок ManyChat).
+    Сохраняем, квалифицируем по накопленному профилю и уведомляем агента —
+    той же функцией, что использует Telegram-версия.
+    """
+    user.phone = phone
+    await session.commit()
+
+    await _notify_agent_with_profile(user.id)
 
     return mc_response([
-        mc_text("Rahmat jigar! Agentimiz tez orada bog'lanadi 🤝")
+        mc_text("Rahmat! Raqamingizni oldim, agentimiz tez orada bog'lanadi 🤝")
     ])
 
 
@@ -846,39 +979,15 @@ async def instagram_phone_webhook(request: web.Request) -> web.Response:
             mc_text("Telefon raqamingizni +998901234567 ko'rinishida yuboring.")
         ]))
 
-    from src.bot.handlers.client.ai_consultation import _maybe_assign_hot_lead
+    normalized = find_phone_in_text(phone) or phone
 
     async with AsyncSessionFactory() as session:
         user = await get_or_create_ig_user(session, contact_id, None)
-        user.phone = phone
+        user.phone = normalized
         await session.commit()
+        user_id = user.id
 
-        profile = (
-            await session.execute(
-                select(ClientProfile).where(ClientProfile.user_id == user.id)
-            )
-        ).scalar_one_or_none()
-
-        qualification = {
-            "qualification_score": (profile.qualification_score if profile else 0),
-            "budget_min_usd": (profile.budget_min_usd if profile else None),
-            "budget_max_usd": (profile.budget_max_usd if profile else None),
-            "preferred_districts": (profile.preferred_districts if profile else []),
-            "preferred_rooms": (profile.preferred_rooms if profile else []),
-            "purchase_timeline": (profile.purchase_timeline if profile else None),
-            "payment_method": (profile.payment_method if profile else None),
-            "summary": ((profile.notes if profile else None) or "Instagram orqali murojaat"),
-        }
-
-        bot = _get_notifier_bot(user.company_id)
-        if bot is not None:
-            try:
-                await _maybe_assign_hot_lead(
-                    session, user, qualification, bot,
-                    client_phone=phone, property_id=None,
-                )
-            except Exception as exc:
-                logger.warning("ig_lead_notify_failed", error=str(exc))
+    await _notify_agent_with_profile(user_id)
 
     return web.json_response(mc_response([
         mc_text("Rahmat! Agentimiz tez orada bog'lanadi 🤝")
