@@ -1200,12 +1200,13 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
     # с пробелами. Если шаблон в сценарии не подставился, придёт литерал
     # "{{client_id}}" — int() на нём падает, и мы обязаны ответить 400,
     # иначе завели бы мусорного пользователя с непредсказуемым id.
-    try:
-        client_id = int(str(data.get("client_id", "")).strip())
-    except (TypeError, ValueError):
-        logger.warning("smmbot_bad_client_id",
-                       raw=str(data.get("client_id"))[:50])
+    raw_id = data.get("client_id")
+    if not raw_id:
         return web.json_response({"error": "client_id required"}, status=400)
+    try:
+        client_id = int(str(raw_id).strip())
+    except (ValueError, TypeError):
+        return web.json_response({"error": "invalid client_id"}, status=400)
 
     user_message = (data.get("message") or "").strip()
     client_name = data.get("client_name") or data.get("name")
