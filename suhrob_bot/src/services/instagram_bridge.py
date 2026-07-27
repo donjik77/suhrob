@@ -1196,17 +1196,31 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
     if not isinstance(data, dict):
         return web.json_response({"error": "invalid body"}, status=400)
 
-    # str().strip() перед int(): SMMBOT присылает client_id строкой, иногда
-    # с пробелами. Если шаблон в сценарии не подставился, придёт литерал
-    # "{{client_id}}" — int() на нём падает, и мы обязаны ответить 400,
-    # иначе завели бы мусорного пользователя с непредсказуемым id.
+    # Разные конструкторы шлют client_id по-разному: SMMBOT и ManyChat —
+    # числом или числовой строкой, SendPulse — hex-ObjectId вида
+    # "507f1f77bcf86cd799439011". Числовые берём как есть, hex сворачиваем
+    # в стабильное число через md5: один и тот же ObjectId всегда даёт один
+    # и тот же id, поэтому клиент не задваивается между сообщениями.
     raw_id = data.get("client_id")
     if not raw_id:
         return web.json_response({"error": "client_id required"}, status=400)
-    try:
-        client_id = int(str(raw_id).strip())
-    except (ValueError, TypeError):
+
+    raw_id = str(raw_id).strip()
+
+    # Пропускаем неподставленные шаблоны
+    if "{{" in raw_id or "}}" in raw_id:
+        logger.warning("smmbot_bad_client_id", raw=raw_id)
         return web.json_response({"error": "invalid client_id"}, status=400)
+
+    # Пытаемся как число (для SMMBOT/ManyChat)
+    try:
+        client_id = int(raw_id)
+    except ValueError:
+        # SendPulse даёт hex ObjectId — хешируем в стабильное отрицательное
+        # число. 15 hex-символов = 60 бит, влезает в BigInteger Postgres.
+        import hashlib
+        h = hashlib.md5(raw_id.encode()).hexdigest()
+        client_id = -abs(int(h[:15], 16))
 
     user_message = (data.get("message") or "").strip()
     client_name = data.get("client_name") or data.get("name")
