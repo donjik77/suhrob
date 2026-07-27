@@ -49,8 +49,18 @@ class ConsultState(StatesGroup):
 
 _CARD_MARKER_RE = re.compile(r"\[CARD\s*:\s*(\d+)\]", re.IGNORECASE)
 _VISIBLE_PROPERTY_ID_RE = re.compile(r"(?:CARD_)?(?:#\s*)?ID[_:\-\s]*(\d+)", re.IGNORECASE)
+# Триггеры "хочу агента". Прежний список ловил несколько книжных слов, а
+# клиенты пишут иначе: "qo'ng'iroq qiling", "raqamingiz bormi", "gaplashsam
+# bo'ladimi", "kelib ko'rsam", по-русски "позвоните", "риелтор". Держим
+# синхронно с _AGENT_CONNECT_RE в instagram_bridge.py — оба канала должны
+# реагировать на одни и те же формулировки.
 _AGENT_CONNECT_RE = re.compile(
-    r"(agent|makler|rieltor|bog'?la|boglan|bog'lan|aloqa|telefon|ko'rish|korish|uchrash)",
+    r"(agent|makler|rieltor|rialtor|broker|menejer|mutaxassis"
+    r"|bog'?la|boglan|bog'lan|aloqa|kontakt|murojaat"
+    r"|telefon|raqam|nomer|qo'?ng'?iroq|qongiroq|zvonok"
+    r"|gaplash|suhbatlash|uchrash|ko'?rish|korish|kelsam|kelib"
+    r"|агент|риелтор|риэлтор|маклер|менеджер|позвон|звонит|связ|контакт"
+    r"|телефон|номер|встрет|посмотрет)",
     re.IGNORECASE,
 )
 
@@ -256,17 +266,10 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
                 select(ClientProfile).where(ClientProfile.user_id == db_user.id)
             )
         ).scalar_one_or_none()
-        client_profile = {}
-        if profile_row:
-            client_profile = {
-                "budget_min_usd": profile_row.budget_min_usd,
-                "budget_max_usd": profile_row.budget_max_usd,
-                "preferred_districts": profile_row.preferred_districts or [],
-                "preferred_rooms": profile_row.preferred_rooms,
-                "purchase_timeline": profile_row.purchase_timeline,
-                "payment_method": profile_row.payment_method,
-                "qualification_score": profile_row.qualification_score,
-            }
+        # Один сборщик на оба канала — включает имя/пол/промокод из notes,
+        # без них format_client_profile заново просил имя и генерировал
+        # новый промокод на каждом длинном диалоге.
+        client_profile = ai_service.profile_to_context(profile_row)
 
     await message.bot.send_chat_action(message.chat.id, "typing")
 
@@ -380,8 +383,10 @@ async def _upsert_client_profile(session: AsyncSession, user_id: int, data: dict
         if data.get("payment_method"):
             existing.payment_method = data["payment_method"]
         existing.qualification_score = max(existing.qualification_score, score)
-        if data.get("summary"):
-            existing.notes = data["summary"]
+        # Имя, пол и промокод не имеют колонок — живут в notes как JSON.
+        # merge_profile_notes не даёт новому вызову затереть уже выданный
+        # промокод, если модель на этом шаге его не увидела.
+        existing.notes = ai_service.merge_profile_notes(existing.notes, data)
         existing.last_contact_at = now
     else:
         profile = ClientProfile(
@@ -394,7 +399,7 @@ async def _upsert_client_profile(session: AsyncSession, user_id: int, data: dict
             purchase_timeline=data.get("purchase_timeline"),
             payment_method=data.get("payment_method"),
             qualification_score=score,
-            notes=data.get("summary"),
+            notes=ai_service.merge_profile_notes(None, data),
             last_contact_at=now,
         )
         session.add(profile)
@@ -501,17 +506,26 @@ async def _maybe_assign_hot_lead(
             agent = await session.get(User, prop.agent_id)
 
     if agent is None:
-        agent = (
-            await session.execute(
-                _select(User).where(
-                    User.company_id == client.company_id,
-                    User.role == UR.agent,
-                    User.is_blocked == False,
-                ).limit(1)
-            )
-        ).scalar_one_or_none()
+        # Сначала ищем агента; если в компании его нет (частый случай —
+        # только директор), лид уходит директору, а не пропадает молча.
+        for role in (UR.agent, UR.director):
+            agent = (
+                await session.execute(
+                    _select(User).where(
+                        User.company_id == client.company_id,
+                        User.role == role,
+                        User.is_blocked == False,
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+            if agent:
+                break
 
     if not agent:
+        import structlog
+        structlog.get_logger().warning(
+            "hot_lead_no_recipient", client_id=client.id, company_id=client.company_id
+        )
         return
 
     if not existing:
@@ -526,30 +540,40 @@ async def _maybe_assign_hot_lead(
         )
         await session.commit()
 
+    from html import escape as _esc
+
     score = qualification.get("qualification_score", 0)
     budget_min = qualification.get("budget_min_usd")
     budget_max = qualification.get("budget_max_usd")
     budget = f"${budget_min}-${budget_max}" if budget_min and budget_max else "-"
-    districts = ", ".join(qualification.get("preferred_districts") or []) or "-"
+    districts = _esc(", ".join(qualification.get("preferred_districts") or []) or "-")
     rooms = ", ".join(str(r) for r in (qualification.get("preferred_rooms") or [])) or "-"
     phone = client_phone or client.phone or "-"
     username = f"@{client.username}" if client.username else "-"
+    is_instagram = (client.telegram_user_id or 0) < 0
+    source = "Instagram" if is_instagram else "Telegram"
 
+    # Имя/резюме экранируем: имя из Instagram может содержать < > & —
+    # без экранирования Telegram отклонит HTML и агент НЕ получит лид.
     msg = t(
         "hot_lead_notify",
-        client_name=client.full_name or client.username or "Anonim",
+        client_name=_esc(client.full_name or client.username or "Anonim"),
         score=score,
         budget=budget,
         districts=districts,
         rooms=rooms,
         timeline=qualification.get("purchase_timeline") or "-",
         payment_method=qualification.get("payment_method") or "-",
-        summary=qualification.get("summary") or "-",
+        summary=_esc(qualification.get("summary") or "-"),
     )
-    msg += f"\n\nTelefon: {phone}\nTelegram: {username}"
+    msg += f"\n\nManba: {source}\nTelefon: {phone}"
+    if not is_instagram:
+        msg += f"\nTelegram: {_esc(username)}"
 
     try:
         await bot.send_message(agent.telegram_user_id, msg, parse_mode="HTML")
-    except Exception:
+    except Exception as exc:
         import structlog
-        structlog.get_logger().warning("hot_lead_notify_failed", agent_id=agent.id)
+        structlog.get_logger().warning(
+            "hot_lead_notify_failed", agent_id=agent.id, error=str(exc)
+        )

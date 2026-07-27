@@ -68,9 +68,15 @@ class Settings(BaseSettings):
     PREMIUM_EMOJI_FIRE: str = ""
     PREMIUM_EMOJI_STAR: str = ""
 
-    # Instagram webhook (ManyChat)
+    # Instagram webhook (Salebot; ManyChat — legacy, убирается после переезда)
     PUBLIC_BASE_URL: str = ""
     INSTAGRAM_COMPANY_ID: Optional[int] = None
+    SALEBOT_API_KEY: str = ""
+    MANYCHAT_API_TOKEN: str = ""
+    # client_type Salebot для Instagram. Нужен, чтобы при подключении к тому
+    # же проекту WhatsApp/Telegram их сообщения не ушли в Instagram-ветку.
+    # 0 = не проверять (принимаем любой канал).
+    SALEBOT_INSTAGRAM_CLIENT_TYPE: int = 6
 
     @field_validator("DATABASE_URL")
     @classmethod

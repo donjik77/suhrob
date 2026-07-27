@@ -10,6 +10,51 @@ from src.services.notification_service import NotificationService
 logger = structlog.get_logger()
 
 
+# ------------------------------------------------------------------ #
+#  Отправка клиенту с учётом канала
+# ------------------------------------------------------------------ #
+#
+# Instagram-клиенты лежат в users с ОТРИЦАТЕЛЬНЫМ telegram_user_id
+# (-abs(salebot_client_id)) — так сделано в мосте, чтобы не путать их с
+# реальными Telegram id. Раньше все джобы звали bot.send_message() с этим
+# отрицательным id: Telegram Bot API такой chat не находит, вызов падал в
+# except и тихо логировался как follow_up_send_failed. То есть механизм
+# напоминаний в принципе не мог достучаться до Instagram.
+#
+# Инлайн-кнопок в Instagram нет, поэтому там используются reply-кнопки
+# Salebot — тот же параметр buttons, что и в обычных ответах моста.
+#
+# job_check_reminders сюда НЕ входит: он уведомляет об окончании подписки
+# директоров и агентов, а это всегда реальные Telegram-пользователи.
+
+def is_instagram_client(user) -> bool:
+    return (user.telegram_user_id or 0) < 0
+
+
+async def send_to_client(bot: Bot, user, text: str,
+                         buttons: list[str] | None = None,
+                         reply_markup=None, parse_mode: str | None = None) -> bool:
+    """
+    Шлёт сообщение клиенту в его канал.
+
+    buttons — подписи кнопок для Instagram; reply_markup — готовая
+    инлайн-клавиатура для Telegram. Каждый канал берёт своё.
+    """
+    if is_instagram_client(user):
+        from src.services.instagram_bridge import send_salebot_message
+        return await send_salebot_message(
+            abs(user.telegram_user_id), text=text, buttons=buttons
+        )
+
+    kwargs = {}
+    if reply_markup is not None:
+        kwargs["reply_markup"] = reply_markup
+    if parse_mode:
+        kwargs["parse_mode"] = parse_mode
+    await bot.send_message(user.telegram_user_id, text, **kwargs)
+    return True
+
+
 async def job_check_reminders(bot: Bot) -> None:
     logger.info("scheduler_job_start", job="check_reminders")
     async with AsyncSessionFactory() as session:
@@ -129,24 +174,35 @@ async def job_send_follow_ups(bot: Bot) -> None:
             if msg:
                 try:
                     from aiogram.utils.keyboard import InlineKeyboardBuilder
-                    from aiogram.types import InlineKeyboardButton
                     builder = InlineKeyboardBuilder()
                     if count == 0:
-                        builder.button(text=t("btn_follow_up_yes"), callback_data="followup:yes")
-                        builder.button(text=t("btn_follow_up_no"), callback_data="followup:no")
-                        builder.button(text=t("btn_follow_up_unsub"), callback_data="followup:unsub")
+                        labels = [t("btn_follow_up_yes"), t("btn_follow_up_no"),
+                                  t("btn_follow_up_unsub")]
+                        builder.button(text=labels[0], callback_data="followup:yes")
+                        builder.button(text=labels[1], callback_data="followup:no")
+                        builder.button(text=labels[2], callback_data="followup:unsub")
                         builder.adjust(2, 1)
-                    elif count == 1:
-                        builder.button(text=t("btn_follow_up_looking"), callback_data="followup:yes")
-                        builder.button(text=t("btn_follow_up_found"), callback_data="followup:found")
-                        builder.adjust(2)
                     else:
-                        builder.button(text=t("btn_follow_up_looking"), callback_data="followup:yes")
-                        builder.button(text=t("btn_follow_up_found"), callback_data="followup:found")
+                        labels = [t("btn_follow_up_looking"), t("btn_follow_up_found")]
+                        builder.button(text=labels[0], callback_data="followup:yes")
+                        builder.button(text=labels[1], callback_data="followup:found")
                         builder.adjust(2)
-                    await bot.send_message(user.telegram_user_id, msg, reply_markup=builder.as_markup())
+
+                    # В Instagram уйдут те же подписи, но reply-кнопками
+                    # Salebot; ответ на них принимает
+                    # /webhook/instagram/followup.
+                    sent = await send_to_client(
+                        bot, user, msg,
+                        buttons=labels,
+                        reply_markup=builder.as_markup(),
+                    )
+                    logger.info("follow_up_sent", user_id=user.id, day=count,
+                                channel="instagram" if is_instagram_client(user)
+                                else "telegram", sent=sent)
                 except Exception as exc:
-                    logger.warning("follow_up_send_failed", user_id=user.id, error=str(exc))
+                    logger.warning("follow_up_send_failed", user_id=user.id,
+                                   channel="instagram" if is_instagram_client(user)
+                                   else "telegram", error=str(exc))
 
         await session.commit()
     logger.info("scheduler_job_done", job="send_follow_ups")
@@ -225,25 +281,44 @@ async def job_send_property_alerts(bot: Bot) -> None:
             rate = await settings_repo.get_float("currency_rate_uzs_per_usd", 12600.0)
 
             try:
-                await bot.send_message(
-                    user.telegram_user_id,
-                    "🔔 <b>Yangi mos variantlar!</b>\n\nSizning qidiruvingizga mos yangi uylar chiqdi:",
-                    parse_mode="HTML",
-                )
-                for prop in props:
-                    caption = format_property_card(prop, rate)
-                    await send_property_media_card(
-                        bot,
-                        chat_id=user.telegram_user_id,
-                        media_items=prop.media,
-                        caption=caption,
-                        reply_markup=property_card_kb(prop.id),
-                        parse_mode="HTML",
-                        caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
+                if is_instagram_client(user):
+                    # В Instagram карточек нет — короткий текстовый список,
+                    # фото клиент попросит сам (как в обычном диалоге).
+                    from src.services.instagram_bridge import send_salebot_message
+                    lines = ["Yangi mos variantlar:"]
+                    for prop in props:
+                        price = f"{float(prop.price_usd):,.0f}".replace(",", " ")
+                        lines.append(
+                            f"{prop.location_district}, {prop.rooms} xona, ${price}"
+                        )
+                    lines.append("Rasmlarini ko'rasizmi?")
+                    await send_salebot_message(
+                        abs(user.telegram_user_id),
+                        text="\n".join(lines),
+                        buttons=["Ha", "Yo'q"],
                     )
+                else:
+                    await bot.send_message(
+                        user.telegram_user_id,
+                        "🔔 <b>Yangi mos variantlar!</b>\n\nSizning qidiruvingizga mos yangi uylar chiqdi:",
+                        parse_mode="HTML",
+                    )
+                    for prop in props:
+                        caption = format_property_card(prop, rate)
+                        await send_property_media_card(
+                            bot,
+                            chat_id=user.telegram_user_id,
+                            media_items=prop.media,
+                            caption=caption,
+                            reply_markup=property_card_kb(prop.id),
+                            parse_mode="HTML",
+                            caption_entities_json=prop.custom_text_entities_json if prop.custom_text else None,
+                        )
                 sent_count += 1
             except Exception as exc:
-                logger.warning("alert_send_failed", user_id=user.id, error=str(exc))
+                logger.warning("alert_send_failed", user_id=user.id,
+                               channel="instagram" if is_instagram_client(user)
+                               else "telegram", error=str(exc))
                 continue
 
             alert.last_notified_at = now
