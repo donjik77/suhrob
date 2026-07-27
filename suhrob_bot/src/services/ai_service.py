@@ -26,13 +26,22 @@ def _client() -> AsyncOpenAI:
     )
 
 
-async def _chat(messages: list[dict], max_tokens: int = 512) -> str:
+# Таймаут на служебные вызовы. Без него AsyncOpenAI ждёт до 600 секунд по
+# умолчанию — а на бесплатных моделях OpenRouter очередь бывает именно такой.
+# Один залипший вызов держал весь ответ клиенту.
+_CHAT_TIMEOUT_SECONDS = 20
+
+
+async def _chat(messages: list[dict], max_tokens: int = 512,
+                model: str | None = None,
+                timeout: float = _CHAT_TIMEOUT_SECONDS) -> str:
     """Send a chat request and return the response text."""
     client = _client()
     response = await client.chat.completions.create(
-        model=settings.OPENROUTER_MODEL,
+        model=model or settings.OPENROUTER_MODEL,
         max_tokens=max_tokens,
         messages=messages,
+        timeout=timeout,
     )
     return response.choices[0].message.content.strip()
 
@@ -185,7 +194,12 @@ Faqat JSON qaytaring, boshqa hech narsa:
 }}"""
 
     try:
-        text = await _chat([{"role": "user", "content": prompt}], max_tokens=512)
+        # ЯВНО на MAIN_MODEL, а не на settings.OPENROUTER_MODEL: дефолт там —
+        # бесплатная reasoning-модель, которая стоит в очереди OpenRouter и
+        # гоняет длинный chain-of-thought ради JSON на 12 полей. Это была
+        # основная причина "бот стал долго отвечать".
+        text = await _chat([{"role": "user", "content": prompt}],
+                           max_tokens=512, model=MAIN_MODEL)
         json_match = re.search(r"\{[\s\S]*\}", text)
         if json_match:
             return json.loads(json_match.group())

@@ -2,7 +2,10 @@
 AI consultation handler — free dialog with Claude for clients.
 Triggered by main menu button or property card inline button.
 """
+import asyncio
 import re
+
+import structlog
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
@@ -185,7 +188,6 @@ async def receive_ai_agent_phone(message: Message, db_user: User, state: FSMCont
 
     data = await state.get_data()
     property_id = data.get("property_id")
-    qualification = data.get("qualification") or {}
 
     async with AsyncSessionFactory() as session:
         await session.execute(
@@ -195,14 +197,11 @@ async def receive_ai_agent_phone(message: Message, db_user: User, state: FSMCont
         )
         await session.commit()
         db_user.phone = phone
-        await _maybe_assign_hot_lead(
-            session,
-            db_user,
-            qualification,
-            message.bot,
-            client_phone=phone,
-            property_id=property_id,
-        )
+
+    # Уведомление агенту собирается из накопленного профиля. Раньше сюда
+    # прокидывалась qualification из FSM — она пропадала при рестарте бота
+    # или при выходе из состояния, и агент получал лид с пустыми полями.
+    await _notify_agent_background(db_user.id, message.bot, property_id)
 
     await state.set_state(ConsultState.chatting)
     await state.update_data(property_id=property_id)
@@ -287,7 +286,6 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
     reply = _clean_ai_reply_for_cards(raw_reply) if property_card_ids else raw_reply
 
     wants_agent = _wants_agent_connection(message.text)
-    needs_phone_for_agent = False
 
     # Save assistant reply
     async with AsyncSessionFactory() as session:
@@ -299,35 +297,122 @@ async def handle_consultation_message(message: Message, db_user: User, state: FS
         ))
         await session.commit()
 
-        # Re-qualify after every message
-        all_history = history + [{"role": "assistant", "content": reply}]
-        qualification = await ai_service.qualify_client(all_history)
-        await _upsert_client_profile(session, db_user.id, qualification)
+    # Клиент явно попросил агента — решаем СРАЗУ по ключевым словам.
+    # Это не требует AI и не задерживает ответ.
+    needs_phone_for_agent = wants_agent and not db_user.phone
 
-        # Auto-assign hot leads, but collect the client's phone before notifying agents.
-        should_connect_agent = qualification.get("qualification_score", 0) >= 70 or wants_agent
-        if should_connect_agent:
-            if db_user.phone:
-                await _maybe_assign_hot_lead(
-                    session,
-                    db_user,
-                    qualification,
-                    message.bot,
-                    client_phone=db_user.phone,
-                    property_id=property_id,
-                )
-            else:
-                needs_phone_for_agent = True
-
+    # ОТВЕЧАЕМ. Всё, что ниже, клиента больше не задерживает.
+    #
+    # Раньше здесь стоял await ai_service.qualify_client(...) — ВТОРОЙ вызов
+    # LLM подряд, и клиент ждал оба. В Instagram-пути квалификация уже давно
+    # уходила в фон, Telegram остался на синхронной схеме — отсюда и было
+    # "бот стал долго отвечать".
     await message.answer(reply)
     await _send_ai_property_cards(message, db_user.company_id, property_card_ids)
+
+    if wants_agent and db_user.phone:
+        # Телефон уже есть — уведомляем агента, тоже в фоне.
+        asyncio.create_task(
+            _notify_agent_background(db_user.id, message.bot, property_id)
+        )
+
     if needs_phone_for_agent:
         await state.set_state(ConsultState.waiting_phone_for_agent)
-        await state.update_data(property_id=property_id, qualification=qualification)
+        await state.update_data(property_id=property_id)
         await message.answer(
             "Agent bilan bog'lash uchun telefon raqamingizni yuboring.",
             reply_markup=request_client_phone_kb(),
         )
+
+    # Квалификация профиля + горячий лид по score — в фоне.
+    all_history = history + [{"role": "assistant", "content": reply}]
+    asyncio.create_task(
+        _qualify_in_background(db_user.id, all_history, message.bot, property_id)
+    )
+
+
+# ------------------------------------------------------------------ #
+#  Фоновые задачи (клиент их не ждёт)
+# ------------------------------------------------------------------ #
+
+logger = structlog.get_logger()
+
+QUALIFY_SCORE_THRESHOLD = 70
+
+
+async def _qualify_in_background(user_id: int, history: list[dict], bot,
+                                 property_id: int | None) -> None:
+    """
+    Квалификация профиля после того, как клиент уже получил ответ.
+
+    Тот же паттерн, что в instagram_bridge._qualify_in_background: результат
+    нужен только для будущих сообщений и для уведомления агента, поэтому
+    держать на нём ответ клиенту незачем.
+    """
+    try:
+        qualification = await asyncio.wait_for(
+            ai_service.qualify_client(history), timeout=25
+        )
+    except asyncio.TimeoutError:
+        logger.warning("qualify_bg_timeout", user_id=user_id)
+        return
+    except Exception as exc:
+        logger.warning("qualify_bg_failed", user_id=user_id, error=str(exc))
+        return
+
+    try:
+        async with AsyncSessionFactory() as session:
+            await _upsert_client_profile(session, user_id, qualification)
+
+            # Горячий лид по score. wants_agent обрабатывается синхронно в
+            # хендлере, здесь остаётся только порог квалификации.
+            if qualification.get("qualification_score", 0) < QUALIFY_SCORE_THRESHOLD:
+                return
+            client = await session.get(User, user_id)
+            if not client or not client.phone:
+                return
+            await _maybe_assign_hot_lead(
+                session, client, qualification, bot,
+                client_phone=client.phone, property_id=property_id,
+            )
+    except Exception as exc:
+        logger.warning("qualify_bg_save_failed", user_id=user_id, error=str(exc))
+
+
+async def _notify_agent_background(user_id: int, bot,
+                                   property_id: int | None) -> None:
+    """Клиент попросил агента и телефон уже есть — уведомляем в фоне."""
+    try:
+        async with AsyncSessionFactory() as session:
+            client = await session.get(User, user_id)
+            if not client or not client.phone:
+                return
+            profile = (
+                await session.execute(
+                    select(ClientProfile).where(ClientProfile.user_id == user_id)
+                )
+            ).scalar_one_or_none()
+            qualification = {
+                "qualification_score": (profile.qualification_score if profile else 0),
+                "budget_min_usd": (profile.budget_min_usd if profile else None),
+                "budget_max_usd": (profile.budget_max_usd if profile else None),
+                "preferred_districts": (profile.preferred_districts if profile else []),
+                "preferred_rooms": (profile.preferred_rooms if profile else []),
+                "purchase_timeline": (profile.purchase_timeline if profile else None),
+                "payment_method": (profile.payment_method if profile else None),
+                # notes — JSON, поэтому резюме достаём распаковщиком, иначе
+                # агенту прилетел бы сырой JSON.
+                "summary": ai_service.profile_summary(
+                    profile.notes if profile else None
+                ) or "Mijoz agent bilan bog'lanishni so'radi",
+            }
+            await _maybe_assign_hot_lead(
+                session, client, qualification, bot,
+                client_phone=client.phone, property_id=property_id,
+            )
+            logger.info("agent_notified_bg", user_id=user_id)
+    except Exception as exc:
+        logger.warning("agent_notify_bg_failed", user_id=user_id, error=str(exc))
 
 
 # ------------------------------------------------------------------ #
