@@ -311,7 +311,7 @@ def generate_property_title(data: dict) -> str:
 #
 # Haiku 4.5 выбран потому, что он дешевле Gemini Flash, лучше следует
 # длинному промпту и поддерживает явное кэширование (см. chat_with_client).
-MAIN_MODEL = "anthropic/claude-haiku-4-5"
+MAIN_MODEL = "google/gemini-3-flash-preview"
 
 # Оставлены для обратной совместимости — на них могут ссылаться другие модули
 FAST_MODEL = MAIN_MODEL
