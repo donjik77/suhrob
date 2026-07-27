@@ -1153,6 +1153,154 @@ async def instagram_followup_webhook(request: web.Request) -> web.Response:
     return web.json_response({"status": "ok"})
 
 
+# ------------------------------------------------------------------ #
+#  SMMBOT: СИНХРОННЫЙ роут
+# ------------------------------------------------------------------ #
+#
+# Отличие от /webhook/instagram (Salebot): там схема асинхронная — мгновенный
+# ACK, а ответ уходит отдельным вызовом API конструктора. SMMBOT работает
+# наоборот: делает POST внутри сценария и ЖДЁТ ответ в том же запросе, после
+# чего сам отправляет его клиенту в директ. Поэтому здесь мы держим запрос,
+# пока думает модель, и возвращаем текст в теле.
+#
+# Из этого следуют два правила:
+#   1. Отвечать ВСЕГДА 200 с полем reply (кроме отсутствующего client_id) —
+#      иначе сценарий SMMBOT падает и клиент не получает ничего.
+#   2. Держать жёсткий таймаут на AI: без него зависший вызов подвесил бы
+#      сценарий на стороне SMMBOT.
+#
+# SALEBOT_API_KEY этому роуту не нужен — исходящих вызовов он не делает.
+
+SMMBOT_AI_TIMEOUT_SECONDS = 45
+SMMBOT_ERROR_REPLY = "Kechiring, xatolik yuz berdi. Qayta urinib ko'ring."
+
+
+async def smmbot_webhook(request: web.Request) -> web.Response:
+    """
+    POST /webhook/smmbot
+
+    Тело запроса:
+        {"client_id": 12345, "message": "...", "client_name": "..."}
+    Ответ:
+        {"reply": "<текст для клиента>"}
+
+    ID-схема та же, что у Salebot-моста: telegram_user_id = -abs(client_id),
+    поэтому один и тот же Instagram-клиент виден джобам планировщика и
+    уведомлениям агенту одинаково, каким бы конструктором он ни пришёл.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid json"}, status=400)
+
+    if not isinstance(data, dict):
+        return web.json_response({"error": "invalid body"}, status=400)
+
+    raw_id = data.get("client_id")
+    if raw_id in (None, ""):
+        return web.json_response({"error": "client_id required"}, status=400)
+    try:
+        client_id = int(raw_id)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "client_id must be int"}, status=400)
+
+    user_message = (data.get("message") or "").strip()
+    client_name = data.get("client_name") or data.get("name")
+
+    # Пустое сообщение (стикер, реакция) — молча отдаём пустой reply.
+    # На пустую строку SMMBOT клиенту ничего не пошлёт.
+    if not user_message:
+        logger.info("smmbot_empty_message", client=client_id)
+        return web.json_response({"reply": ""})
+
+    logger.info("smmbot_message_in", client=client_id, text=user_message[:100])
+
+    try:
+        reply = await asyncio.wait_for(
+            _smmbot_generate_reply(client_id, user_message, client_name),
+            timeout=SMMBOT_AI_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("smmbot_ai_timeout", client=client_id)
+        return web.json_response({"reply": SMMBOT_ERROR_REPLY})
+    except Exception as exc:
+        logger.error("smmbot_failed", client=client_id, error=str(exc))
+        return web.json_response({"reply": SMMBOT_ERROR_REPLY})
+
+    logger.info("smmbot_message_out", client=client_id, length=len(reply))
+    return web.json_response({"reply": reply})
+
+
+async def _smmbot_generate_reply(client_id: int, user_message: str,
+                                 client_name: str | None) -> str:
+    """
+    Пользователь -> история -> профиль -> AI -> сохранение.
+    Вынесено отдельно, чтобы весь путь можно было ограничить одним wait_for.
+    """
+    async with AsyncSessionFactory() as session:
+        user = await get_or_create_ig_user(session, client_id, client_name)
+        user_id = user.id
+        company_id = user.company_id
+
+        history_rows = (
+            await session.execute(
+                select(ClientConversation)
+                .where(ClientConversation.user_id == user_id)
+                .order_by(ClientConversation.created_at.desc())
+                .limit(10)
+            )
+        ).scalars().all()
+        history = [{"role": r.role, "content": r.message}
+                   for r in reversed(history_rows)]
+
+        profile_row = (
+            await session.execute(
+                select(ClientProfile).where(ClientProfile.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+        # Тот же сборщик, что в Telegram и в Salebot-мосте: тянет из notes
+        # имя, пол и уже выданный промокод, иначе бот выдал бы новый.
+        client_profile = ai_service.profile_to_context(profile_row)
+
+        session.add(ClientConversation(
+            user_id=user_id, property_id=None, role="user", message=user_message,
+        ))
+        await session.commit()
+
+    async with AsyncSessionFactory() as ai_session:
+        raw_reply = await chat_with_client(
+            user_message=user_message,
+            conversation_history=history,
+            client_profile=client_profile,
+            company_id=company_id or 0,
+            session=ai_session,
+            property_id=None,
+            channel="instagram",
+        )
+
+    # Маркеры [CARD:ID] в Instagram-режиме промпт запрещает, но если модель
+    # их всё же вставила — вырезаем, клиент их видеть не должен.
+    reply = clean_ai_reply(raw_reply)
+
+    async with AsyncSessionFactory() as session:
+        session.add(ClientConversation(
+            user_id=user_id, property_id=None, role="assistant", message=reply,
+        ))
+        await session.commit()
+
+    # Квалификация профиля — в фоне, ответ SMMBOT она не задерживает.
+    # Без неё имя/пол/промокод никогда не попадут в client_profiles.notes,
+    # и на длинном диалоге бот заново спросит имя и выдаст новый промокод
+    # (та же поломка, что чинили в п.3 ТЗ).
+    history_for_qualify = history + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": reply},
+    ]
+    asyncio.create_task(_qualify_in_background(user_id, history_for_qualify))
+
+    return reply
+
+
 # BotManager сохраняем при старте, чтобы уметь писать агентам в Telegram
 _bot_manager = None
 
@@ -1174,9 +1322,12 @@ def register_instagram_routes(app: web.Application, bot_manager=None) -> None:
     global _bot_manager
     _bot_manager = bot_manager
 
+    # Salebot — асинхронная схема (ACK сразу, ответ отдельным вызовом API)
     app.router.add_post("/webhook/instagram", instagram_webhook)
     app.router.add_post("/webhook/instagram/phone", instagram_phone_webhook)
     app.router.add_post("/webhook/instagram/followup", instagram_followup_webhook)
+    # SMMBOT — синхронная схема (ответ возвращается в теле того же запроса)
+    app.router.add_post("/webhook/smmbot", smmbot_webhook)
     app.router.add_get("/media/{media_id}", media_proxy)
     app.router.add_get("/health", lambda r: web.json_response(
         {"ok": True, "version": BRIDGE_VERSION,
