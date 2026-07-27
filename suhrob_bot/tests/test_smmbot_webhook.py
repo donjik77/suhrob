@@ -134,15 +134,16 @@ class SmmbotWebhookTest(AioHTTPTestCase):
             )).scalars().all()
             self.assertEqual(len(users), 1)
 
-    async def test_negative_client_id_normalised(self):
-        """abs() — на случай, если SMMBOT пришлёт id со знаком."""
-        await self.client.post("/webhook/smmbot",
-                               json={"client_id": -999, "message": "Salom"})
-        async with self.Session() as s:
-            user = (await s.execute(
-                select(User).where(User.telegram_user_id == -999)
-            )).scalar_one_or_none()
-            self.assertIsNotNone(user)
+    async def test_negative_client_id_400(self):
+        """
+        Правило "чистые цифры" отбраковывает id со знаком. Ни один
+        конструктор отрицательные id не шлёт, а "-999" от нас же
+        (мы храним клиентов с минусом) в webhook приходить не должен.
+        """
+        resp = await self.client.post("/webhook/smmbot",
+                                      json={"client_id": -999,
+                                            "message": "Salom"})
+        self.assertEqual(resp.status, 400)
 
     async def test_card_markers_stripped(self):
         async def chat_with_marker(**kwargs):
@@ -227,14 +228,25 @@ class SmmbotWebhookTest(AioHTTPTestCase):
             user = (await s.execute(select(User))).scalar_one()
             self.assertLess(abs(user.telegram_user_id), 2 ** 63 - 1)
 
-    async def test_non_numeric_string_is_hashed_not_rejected(self):
+    async def test_garbage_client_id_400(self):
         """
-        Побочный эффект hex-ветки: любая нечисловая строка без {{ }} теперь
-        принимается и хешируется, а не отбивается 400.
+        Мусор не должен молча хешироваться: иначе все обращения с
+        "undefined" слиплись бы в одного клиента с общей историей.
+        Принимаем только чистые цифры или 24-символьный ObjectId.
         """
-        resp = await self.client.post("/webhook/smmbot",
-                                      json={"client_id": "abc", "message": "hi"})
-        self.assertEqual(resp.status, 200)
+        for raw in ["abc", "undefined", "None", "null", "user_42",
+                    "507f1f77bcf86cd7994390",     # 22 символа — короткий
+                    "507f1f77bcf86cd799439011ab",  # 26 — длинный
+                    "507f1f77bcf86cd79943901z"]:   # 24, но 'z' не hex
+            resp = await self.client.post("/webhook/smmbot",
+                                          json={"client_id": raw,
+                                                "message": "hi"})
+            self.assertEqual(resp.status, 400, raw)
+            self.assertEqual((await resp.json())["error"], "invalid client_id")
+
+        async with self.Session() as s:
+            users = (await s.execute(select(User))).scalars().all()
+            self.assertEqual(users, [], "мусор не должен заводить клиентов")
 
     async def test_numeric_string_client_id_accepted(self):
         """SMMBOT шлёт id строкой — должно работать."""

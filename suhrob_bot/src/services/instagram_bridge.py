@@ -94,6 +94,11 @@ INSTAGRAM_COMPANY_ID = getattr(settings, "INSTAGRAM_COMPANY_ID", None)
 _CARD_MARKER_RE = re.compile(r"\[CARD\s*:\s*(\d+)\]", re.IGNORECASE)
 _VISIBLE_PROPERTY_ID_RE = re.compile(r"(?:CARD_)?(?:#\s*)?ID[_:\-\s]*(\d+)", re.IGNORECASE)
 
+# ObjectId SendPulse — ровно 24 hex-символа. Длину проверяем строго: иначе
+# под "hex" подошли бы слова вроде "added" или "face", и мусорные значения
+# заводили бы клиентов вместо честной 400.
+_OBJECT_ID_RE = re.compile(r"[0-9a-fA-F]{24}")
+
 # Сообщение целиком из одного номера.
 _PHONE_RE = re.compile(r"^\+?\d[\d\s().\-]{6,}$")
 # Телефон ВНУТРИ длинного сообщения ("mening raqamim +998901234567").
@@ -1212,15 +1217,21 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
         logger.warning("smmbot_bad_client_id", raw=raw_id)
         return web.json_response({"error": "invalid client_id"}, status=400)
 
-    # Пытаемся как число (для SMMBOT/ManyChat)
-    try:
+    if raw_id.isdigit():
+        # SMMBOT / ManyChat — числовой id
         client_id = int(raw_id)
-    except ValueError:
+    elif _OBJECT_ID_RE.fullmatch(raw_id):
         # SendPulse даёт hex ObjectId — хешируем в стабильное отрицательное
         # число. 15 hex-символов = 60 бит, влезает в BigInteger Postgres.
         import hashlib
         h = hashlib.md5(raw_id.encode()).hexdigest()
         client_id = -abs(int(h[:15], 16))
+    else:
+        # Ни число, ни ObjectId. Без этой ветки любой мусор ("undefined",
+        # "None", пустой результат подстановки) молча хешировался бы, и все
+        # такие обращения слипались бы в одного клиента с общей историей.
+        logger.warning("smmbot_bad_client_id", raw=raw_id)
+        return web.json_response({"error": "invalid client_id"}, status=400)
 
     user_message = (data.get("message") or "").strip()
     client_name = data.get("client_name") or data.get("name")
