@@ -166,6 +166,41 @@ class SmmbotWebhookTest(AioHTTPTestCase):
                                       json={"client_id": "abc", "message": "hi"})
         self.assertEqual(resp.status, 400)
 
+    async def test_unrendered_template_400(self):
+        """
+        Шаблон в сценарии SMMBOT не подставился — приходит литерал.
+        Заводить пользователя с таким id нельзя.
+        """
+        for raw in ["{{client_id}}", "{{ client_id }}", "$client_id", "null"]:
+            resp = await self.client.post("/webhook/smmbot",
+                                          json={"client_id": raw,
+                                                "message": "Salom"})
+            self.assertEqual(resp.status, 400, raw)
+
+    async def test_numeric_string_client_id_accepted(self):
+        """SMMBOT шлёт id строкой — должно работать."""
+        resp = await self.client.post("/webhook/smmbot",
+                                      json={"client_id": "999",
+                                            "message": "Salom"})
+        self.assertEqual(resp.status, 200)
+        async with self.Session() as s:
+            user = (await s.execute(
+                select(User).where(User.telegram_user_id == -999)
+            )).scalar_one_or_none()
+            self.assertIsNotNone(user)
+
+    async def test_padded_client_id_accepted(self):
+        resp = await self.client.post("/webhook/smmbot",
+                                      json={"client_id": "  999  ",
+                                            "message": "Salom"})
+        self.assertEqual(resp.status, 200)
+
+    async def test_null_client_id_400(self):
+        resp = await self.client.post("/webhook/smmbot",
+                                      json={"client_id": None,
+                                            "message": "Salom"})
+        self.assertEqual(resp.status, 400)
+
     async def test_invalid_json_400(self):
         resp = await self.client.post("/webhook/smmbot", data="not json",
                                       headers={"Content-Type": "application/json"})

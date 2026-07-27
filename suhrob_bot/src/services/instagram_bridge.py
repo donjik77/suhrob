@@ -1196,13 +1196,16 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
     if not isinstance(data, dict):
         return web.json_response({"error": "invalid body"}, status=400)
 
-    raw_id = data.get("client_id")
-    if raw_id in (None, ""):
-        return web.json_response({"error": "client_id required"}, status=400)
+    # str().strip() перед int(): SMMBOT присылает client_id строкой, иногда
+    # с пробелами. Если шаблон в сценарии не подставился, придёт литерал
+    # "{{client_id}}" — int() на нём падает, и мы обязаны ответить 400,
+    # иначе завели бы мусорного пользователя с непредсказуемым id.
     try:
-        client_id = int(raw_id)
+        client_id = int(str(data.get("client_id", "")).strip())
     except (TypeError, ValueError):
-        return web.json_response({"error": "client_id must be int"}, status=400)
+        logger.warning("smmbot_bad_client_id",
+                       raw=str(data.get("client_id"))[:50])
+        return web.json_response({"error": "client_id required"}, status=400)
 
     user_message = (data.get("message") or "").strip()
     client_name = data.get("client_name") or data.get("name")
