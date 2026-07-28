@@ -72,9 +72,9 @@ SALEBOT_API_BASE = "https://chatter.salebot.pro/api"
 # канал. 0 в настройках = не проверять.
 SALEBOT_IG_CLIENT_TYPE = int(getattr(settings, "SALEBOT_INSTAGRAM_CLIENT_TYPE", 6) or 0)
 
-# Сколько объектов максимум показываем за один ответ и сколько фото на объект.
+# Сколько объектов максимум показываем за один ответ. Фото на объект — без
+# лимита, шлём все, что есть в карточке.
 MAX_CARDS_PER_REPLY = 2
-MAX_PHOTOS_PER_PROPERTY = 4
 
 # Версия моста — видна в GET /health. По ней проверяем, что Railway запустил
 # свежий код, а не кэшированную сборку.
@@ -491,7 +491,7 @@ async def build_photo_blocks(session, company_id: int | None,
         photos = [
             m for m in (prop.media or [])
             if getattr(m.file_type, "value", m.file_type) == FileType.photo.value
-        ][:MAX_PHOTOS_PER_PROPERTY]
+        ]
 
         if not photos or not PUBLIC_BASE_URL:
             # Логируем причину: либо у объекта нет фото, либо не задан
@@ -566,7 +566,7 @@ async def build_photo_urls(session, company_id: int | None,
         photos = [
             m for m in (prop.media or [])
             if getattr(m.file_type, "value", m.file_type) == FileType.photo.value
-        ][:MAX_PHOTOS_PER_PROPERTY]
+        ]
 
         if not photos or not PUBLIC_BASE_URL:
             logger.warning(
