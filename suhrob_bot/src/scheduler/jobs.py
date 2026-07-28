@@ -307,9 +307,11 @@ async def job_send_property_alerts(bot: Bot) -> None:
                         logger.warning("alert_no_sendpulse_contact", user_id=user.id)
                         continue
 
+                    from src.services.ai_service import normalize_price_usd
+
                     lines = ["Yangi mos variantlar:"]
                     for prop in props:
-                        price = f"{float(prop.price_usd):,.0f}".replace(",", " ")
+                        price = f"{normalize_price_usd(prop.price_usd):,.0f}".replace(",", " ")
                         lines.append(
                             f"{prop.location_district}, {prop.rooms} xona, ${price}"
                         )

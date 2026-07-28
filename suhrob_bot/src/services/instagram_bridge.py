@@ -505,7 +505,7 @@ async def build_photo_blocks(session, company_id: int | None,
             continue
 
         # Короткая подпись — деловой тон Instagram, без карточки.
-        price = f"{float(prop.price_usd):,.0f}".replace(",", " ")
+        price = f"{ai_service.normalize_price_usd(prop.price_usd):,.0f}".replace(",", " ")
         blocks.append({
             "text": f"{prop.location_district}, {prop.rooms} xona, ${price}"
         })
@@ -577,7 +577,7 @@ async def build_photo_urls(session, company_id: int | None,
             )
             continue
 
-        price = f"{float(prop.price_usd):,.0f}".replace(",", " ")
+        price = f"{ai_service.normalize_price_usd(prop.price_usd):,.0f}".replace(",", " ")
         caption_lines.append(f"{prop.location_district}, {prop.rooms} xona, ${price}")
         for photo in photos:
             urls.append(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg")

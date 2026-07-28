@@ -114,6 +114,8 @@ async def send_sendpulse_message(contact_id: str, text: str) -> bool:
         "contact_id": str(contact_id),
         "messages": [{"type": "text", "message": {"text": text}}],
     }
+    if settings.SENDPULSE_BOT_ID:
+        payload["bot_id"] = settings.SENDPULSE_BOT_ID
     return await _send(payload)
 
 
@@ -133,6 +135,8 @@ async def send_sendpulse_image(contact_id: str, image_url: str) -> bool:
             },
         }],
     }
+    if settings.SENDPULSE_BOT_ID:
+        payload["bot_id"] = settings.SENDPULSE_BOT_ID
     return await _send(payload)
 
 

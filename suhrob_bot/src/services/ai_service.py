@@ -467,6 +467,32 @@ def extract_rooms(message: str, history: list) -> int | None:
     return None
 
 
+def normalize_price_usd(price) -> float:
+    """
+    В базе изредка встречаются цены с потерянными нулями (53 вместо 53000)
+    — оператор ввёл сумму в тысячах или ошибся при копировании. Реальная
+    цена дома/квартиры в Самарканде не бывает ниже $1000, так что такое
+    значение — гарантированно опечатка, а не реальная цена.
+
+    Исправляем ТОЛЬКО при показе клиенту/модели — саму запись в БД не
+    трогаем (это не полноценная валидация ввода, а страховка на выводе).
+    """
+    value = float(price or 0)
+    if 0 < value < 1000:
+        return value * 1000
+    return value
+
+
+def _has_photo_media(prop) -> bool:
+    """Хотя бы одно фото в media — видео без фото клиенту не показываем."""
+    from src.db.models import FileType
+
+    return any(
+        getattr(m.file_type, "value", m.file_type) == FileType.photo.value
+        for m in (prop.media or [])
+    )
+
+
 async def search_properties(
     company_id: int,
     district: str | None,
@@ -482,14 +508,20 @@ async def search_properties(
     (текст для модели) и Instagram-мост (там модель НЕ печатает [CARD:ID],
     поэтому какие объекты показывать по запросу "покажите фото" мост должен
     знать сам, а не выуживать из ответа модели).
+
+    В базе бывают дубли одного объекта: одну карточку заливают с фото,
+    вторую (тот же дом) — только с видео. Видео клиенту не отправляем
+    никогда, поэтому video-only дубль как вариант вообще не предлагаем —
+    иначе модель могла описать именно его, а показать было бы нечего.
     """
     from sqlalchemy import select, or_
+    from sqlalchemy.orm import selectinload
     from src.db.models import Property, PropertyStatus
 
     q = select(Property).where(
         Property.company_id == company_id,
         Property.status == PropertyStatus.active,
-    )
+    ).options(selectinload(Property.media))
 
     if district:
         # Ищем и в районе, и в адресе: "Gagarin" в Самарканде — это улица,
@@ -503,8 +535,11 @@ async def search_properties(
     if rooms:
         q = q.where(Property.rooms == rooms)
 
-    result = await session.execute(q.limit(limit))
-    return list(result.scalars())
+    # Over-fetch: часть кандидатов отсеется на фильтре "нет фото" ниже,
+    # без запаса запрос стабильно возвращал бы меньше limit валидных вариантов.
+    result = await session.execute(q.limit(limit * 4))
+    props = list(result.scalars())
+    return [p for p in props if _has_photo_media(p)][:limit]
 
 
 async def build_properties_context(
@@ -542,7 +577,7 @@ async def build_properties_context(
                 "Tanlangan obyekt konteksti:\n\n"
                 f"CARD_ID:{selected.id} | Tuman: {selected.location_district} | "
                 f"Manzil: {selected.location_address or '—'} | "
-                f"{selected.rooms} xona | ${selected.price_usd:,.0f}\n"
+                f"{selected.rooms} xona | ${normalize_price_usd(selected.price_usd):,.0f}\n"
                 f"{text}\n\n"
                 "Mijoz aynan shu obyekt haqida so'rayapti. "
                 "Tayyor tavsifdan foydalanib javob bering."
@@ -573,7 +608,7 @@ async def build_properties_context(
         lines.append(
             f"CARD_ID:{p.id} | Tuman: {p.location_district} | "
             f"Manzil: {p.location_address or '—'} | "
-            f"{p.rooms} xona | ${p.price_usd:,.0f}\n"
+            f"{p.rooms} xona | ${normalize_price_usd(p.price_usd):,.0f}\n"
             f"{text[:300]}"
         )
 
