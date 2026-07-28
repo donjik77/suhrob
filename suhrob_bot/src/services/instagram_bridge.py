@@ -134,14 +134,21 @@ _AGENT_CONNECT_RE = re.compile(
 )
 
 # Согласие на показ фото. В Instagram фото уходят ТОЛЬКО после явного "да".
+# Раньше было ^\W*(...)\W*$ — требовал, чтобы ВСЁ сообщение сводилось к
+# одному токену. "ha ko'rsating" или "мayli, rasm tashlang" не матчились,
+# хотя это явное согласие — клиент не получал фото (баг 1 повторного ТЗ).
+# Теперь ищем токен-согласие ГДЕ УГОДНО в сообщении по границе слова.
 _AFFIRM_RE = re.compile(
-    r"^\W*("
+    r"\b("
     r"ha+|xa+|mayli|ok+|okey|okay|yes|bo'?ladi|boladi|albatta|zo'?r"
-    r"|ko'?rsat\w*|korsat\w*|yubor\w*|rasm\w*|foto\w*|surat\w*"
-    r"|да|ага|давай|хорошо|конечно|покажи\w*|можно|\+"
-    r")\W*$",
+    r"|ko'?rsat\w*|korsat\w*|yubor\w*|rasm\w*|rasmlar\w*|foto\w*|surat\w*"
+    r"|да|ага|давай|хорошо|конечно|покажи\w*|можно"
+    r")\b",
     re.IGNORECASE,
 )
+
+# Одиночные символы/эмодзи-согласия — не ловятся \b-регуляркой выше.
+_AFFIRM_SYMBOLS = {"+", "👍", "👌"}
 
 QUALIFY_SCORE_THRESHOLD = 70
 
@@ -205,7 +212,12 @@ def clean_ai_reply(reply: str) -> str:
 
 def wants_photos(text: str) -> bool:
     """Клиент согласился посмотреть фото."""
-    return bool(_AFFIRM_RE.match((text or "").strip()))
+    t = (text or "").strip()
+    if not t:
+        return False
+    if t in _AFFIRM_SYMBOLS:
+        return True
+    return bool(_AFFIRM_RE.search(t))
 
 
 def mentions_property(text: str) -> bool:
