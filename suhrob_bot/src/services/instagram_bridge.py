@@ -942,12 +942,14 @@ async def _process_and_reply(contact_id: str, user_message: str,
                 sent=sent)
 
 
-async def _candidate_property_ids(session, company_id: int | None,
-                                  user_message: str,
-                                  history: list[dict]) -> list[int]:
+async def _candidate_properties(session, company_id: int | None,
+                                user_message: str,
+                                history: list[dict]) -> list:
     """
-    Объекты, о которых шла речь в этом ответе. Тот же поиск, что строит
-    контекст для модели, поэтому список совпадает с тем, что она видела.
+    Property-объекты, которые видела модель при генерации этого ответа.
+    Тот же поиск, что строит контекст для модели. MAX_CARDS_PER_REPLY может
+    вернуть до 2 объектов — сама модель по промпту описывает только ОДИН из
+    них за раз, см. _match_mentioned_property_ids.
     """
     if not company_id:
         return []
@@ -957,14 +959,53 @@ async def _candidate_property_ids(session, company_id: int | None,
         )
         price_max = ai_service.extract_price(user_message, history)
         rooms = ai_service.extract_rooms(user_message, history)
-        props = await ai_service.search_properties(
+        return await ai_service.search_properties(
             company_id, district, price_max, rooms, session,
             limit=MAX_CARDS_PER_REPLY,
         )
-        return [p.id for p in props]
     except Exception as exc:
         logger.warning("ig_candidates_failed", error=str(exc))
         return []
+
+
+_PRICE_IN_TEXT_RE = re.compile(r"\$\s*([\d\s.,]{3,})")
+
+
+def _match_mentioned_property_ids(props: list, reply_text: str) -> list[int]:
+    """
+    INSTAGRAM_RULES требует ровно ОДИН объект за сообщение. Поиск
+    (_candidate_properties) может вернуть до MAX_CARDS_PER_REPLY=2
+    кандидатов — раньше на "ha" клиенту уходили подпись и фото ОБОИХ,
+    хотя текстом был описан только один (Gagarina 2 xona $53000, а
+    отправлялись ещё и Gagarina 3 xona $80000). Сопоставляем цену из
+    текста ответа с ценой объекта, чтобы фото ушли только за реально
+    упомянутый вариант.
+    """
+    if not props:
+        return []
+    amounts: set[int] = set()
+    for raw in _PRICE_IN_TEXT_RE.findall(reply_text or ""):
+        digits = re.sub(r"[\s.,]", "", raw)
+        if digits.isdigit():
+            amounts.add(int(digits))
+    if amounts:
+        matched = [p.id for p in props if int(p.price_usd or 0) in amounts]
+        if matched:
+            return matched[:1]
+    # Цену в тексте не нашли/не совпала — берём только первого кандидата,
+    # а не всех: лучше не угадать объект, чем прислать фото обоих.
+    return [props[0].id]
+
+
+async def _candidate_property_ids(session, company_id: int | None,
+                                  user_message: str,
+                                  history: list[dict]) -> list[int]:
+    """
+    Совместимость со старым Salebot-мостом (_process_and_reply) — он не
+    различает "один объект за раз" и берёт весь список ID как раньше.
+    """
+    props = await _candidate_properties(session, company_id, user_message, history)
+    return [p.id for p in props]
 
 
 async def _qualify_in_background(user_id: int, history: list[dict]) -> None:
@@ -1493,15 +1534,14 @@ async def _smmbot_generate_reply(client_id: int, user_message: str,
     # держался ЦЕЛИКОМ на промпте: модель не всегда его задавала, и клиент
     # не понимал, что фото вообще можно посмотреть (п.2 ТЗ).
     pending_ids: list[int] = []
-    async with AsyncSessionFactory() as session:
-        pending_ids = await _candidate_property_ids(
-            session, company_id, user_message, history
-        )
-
-    if pending_ids and mentions_property(reply) and not asks_about_photos(reply):
-        reply = f"{reply}\nRasmlarini ko'rasizmi?"
-    elif not mentions_property(reply):
-        pending_ids = []
+    if mentions_property(reply):
+        async with AsyncSessionFactory() as session:
+            props = await _candidate_properties(
+                session, company_id, user_message, history
+            )
+        pending_ids = _match_mentioned_property_ids(props, reply)
+        if pending_ids and not asks_about_photos(reply):
+            reply = f"{reply}\nRasmlarini ko'rasizmi?"
 
     async with AsyncSessionFactory() as session:
         session.add(ClientConversation(
