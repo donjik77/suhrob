@@ -45,6 +45,7 @@ from src.db.models import (
 )
 from src.services import ai_service
 from src.services.ai_service import chat_with_client
+from src.services.sendpulse_client import send_sendpulse_image
 
 logger = structlog.get_logger()
 
@@ -150,6 +151,11 @@ _contact_gender: dict[str, str] = {}
 # Объекты, по которым мы предложили клиенту фото и ждём "да". Ровно тот же
 # паттерн "ждём ответ клиента на предыдущий вопрос", что и приём номера.
 _PENDING_PHOTOS: dict[str, list[int]] = {}
+
+# То же самое, но для синхронного роута /webhook/smmbot (SendPulse). Ключ —
+# числовой/хэшированный client_id из smmbot_webhook, отдельная мапа, чтобы не
+# пересекаться по ключам с Salebot-контактами из _PENDING_PHOTOS.
+_SMMBOT_PENDING_PHOTOS: dict[int, list[int]] = {}
 
 
 def find_phone_in_text(text: str) -> str | None:
@@ -404,6 +410,30 @@ async def get_or_create_ig_user(session, contact_id: str | int,
     return user
 
 
+async def _ensure_sendpulse_contact_id(session, user_id: int, contact_id: str) -> None:
+    """
+    Сохраняет оригинальный SendPulse contact_id в ClientProfile.
+
+    users.telegram_user_id для SendPulse-клиентов — это -abs(md5-хеш
+    contact_id) (см. smmbot_webhook) и обратно не разворачивается. Без
+    самого contact_id джобы планировщика (follow-up, property alerts) не
+    могут написать клиенту через SendPulse API напрямую.
+    """
+    contact_id = str(contact_id)
+    profile = (
+        await session.execute(
+            select(ClientProfile).where(ClientProfile.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    if profile:
+        if profile.sendpulse_contact_id != contact_id:
+            profile.sendpulse_contact_id = contact_id
+            await session.commit()
+    else:
+        session.add(ClientProfile(user_id=user_id, sendpulse_contact_id=contact_id))
+        await session.commit()
+
+
 # ------------------------------------------------------------------ #
 #  Фото объектов — уходят ТОЛЬКО по явному согласию клиента
 # ------------------------------------------------------------------ #
@@ -480,6 +510,70 @@ async def build_photo_blocks(session, company_id: int | None,
     await prefetch_media(photo_ids)
 
     return blocks
+
+
+async def build_photo_urls(session, company_id: int | None,
+                           property_ids: list[int]) -> tuple[str, list[str]]:
+    """
+    Версия build_photo_blocks для /webhook/smmbot: SendPulse получает ответ
+    синхронно одним JSON {"reply": ..., "photos": [...]}, поэтому вместо
+    Salebot-блоков (текст + отдельные attachment_url) возвращаем подпись
+    строкой и плоский список публичных URL фото.
+    """
+    if not company_id or not property_ids:
+        return "", []
+
+    result = await session.execute(
+        select(Property)
+        .where(
+            Property.company_id == company_id,
+            Property.status == PropertyStatus.active,
+            Property.id.in_(property_ids),
+        )
+        .options(selectinload(Property.media))
+    )
+    props_by_id = {p.id: p for p in result.scalars().all()}
+    props = [props_by_id[pid] for pid in property_ids if pid in props_by_id]
+    props = props[:MAX_CARDS_PER_REPLY]
+
+    if not props:
+        return "", []
+
+    await session.execute(
+        update(Property)
+        .where(Property.id.in_([p.id for p in props]))
+        .values(views_count=Property.views_count + 1)
+    )
+    await session.commit()
+
+    caption_lines: list[str] = []
+    urls: list[str] = []
+    photo_ids: list[int] = []
+
+    for prop in props:
+        photos = [
+            m for m in (prop.media or [])
+            if getattr(m.file_type, "value", m.file_type) == FileType.photo.value
+        ][:MAX_PHOTOS_PER_PROPERTY]
+
+        if not photos or not PUBLIC_BASE_URL:
+            logger.warning(
+                "smmbot_no_photo_for_property",
+                property_id=prop.id,
+                media_count=len(prop.media or []),
+                has_public_base_url=bool(PUBLIC_BASE_URL),
+            )
+            continue
+
+        price = f"{float(prop.price_usd):,.0f}".replace(",", " ")
+        caption_lines.append(f"{prop.location_district}, {prop.rooms} xona, ${price}")
+        for photo in photos:
+            urls.append(f"{PUBLIC_BASE_URL}/media/{photo.id}.jpg")
+            photo_ids.append(photo.id)
+
+    await prefetch_media(photo_ids)
+
+    return "\n".join(caption_lines), urls
 
 
 # ------------------------------------------------------------------ #
@@ -1244,9 +1338,46 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
 
     logger.info("smmbot_message_in", client=client_id, text=user_message[:100])
 
+    # Клиент согласился посмотреть фото по ранее предложенным вариантам.
+    # Проверяем ДО AI — это ответ на наш предыдущий вопрос, не новый запрос.
+    # Без этой ветки на боевом /webhook/smmbot фото не уходили НИКОГДА: тут
+    # раньше не было ничего, кроме текстового reply.
+    pending = _SMMBOT_PENDING_PHOTOS.get(client_id)
+    if pending and wants_photos(user_message):
+        _SMMBOT_PENDING_PHOTOS.pop(client_id, None)
+        try:
+            async with AsyncSessionFactory() as session:
+                user = await get_or_create_ig_user(session, client_id, client_name)
+                await _ensure_sendpulse_contact_id(session, user.id, raw_id)
+                session.add(ClientConversation(
+                    user_id=user.id, property_id=None, role="user",
+                    message=user_message,
+                ))
+                await session.commit()
+                caption, urls = await build_photo_urls(session, user.company_id, pending)
+                if urls:
+                    session.add(ClientConversation(
+                        user_id=user.id, property_id=None, role="assistant",
+                        message=caption,
+                    ))
+                    await session.commit()
+            if urls:
+                # Реальная отправка идёт через SendPulse API, не через JSON
+                # {"reply": ...}: SendPulse-флоу не умеет разворачивать массив
+                # URL из ответа в отдельные вложения. Не ждём отправки —
+                # reply клиенту должен уйти первым.
+                for url in urls:
+                    asyncio.create_task(send_sendpulse_image(raw_id, url))
+                logger.info("smmbot_photos_sending", client=client_id, count=len(urls))
+                return web.json_response({"reply": caption})
+            return web.json_response({"reply": "Rasmlar hozircha yo'q."})
+        except Exception as exc:
+            logger.error("smmbot_photo_send_failed", client=client_id, error=str(exc))
+            return web.json_response({"reply": SMMBOT_ERROR_REPLY})
+
     try:
-        reply = await asyncio.wait_for(
-            _smmbot_generate_reply(client_id, user_message, client_name),
+        reply, photo_ids = await asyncio.wait_for(
+            _smmbot_generate_reply(client_id, user_message, client_name, raw_id),
             timeout=SMMBOT_AI_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -1256,20 +1387,54 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
         logger.error("smmbot_failed", client=client_id, error=str(exc))
         return web.json_response({"reply": SMMBOT_ERROR_REPLY})
 
+    if photo_ids:
+        _SMMBOT_PENDING_PHOTOS[client_id] = photo_ids
+
     logger.info("smmbot_message_out", client=client_id, length=len(reply))
     return web.json_response({"reply": reply})
 
 
 async def _smmbot_generate_reply(client_id: int, user_message: str,
-                                 client_name: str | None) -> str:
+                                 client_name: str | None,
+                                 contact_id: str) -> tuple[str, list[int]]:
     """
     Пользователь -> история -> профиль -> AI -> сохранение.
     Вынесено отдельно, чтобы весь путь можно было ограничить одним wait_for.
+
+    contact_id — оригинальный SendPulse contact_id (не хешированный client_id
+    из URL/ключей словарей), сохраняется в ClientProfile, чтобы джобы
+    планировщика могли слать сообщения через SendPulse API напрямую.
+
+    Возвращает (текст ответа, ID объектов, по которым можно предложить фото).
+    Второе используется вызывающим smmbot_webhook, чтобы завести
+    _SMMBOT_PENDING_PHOTOS — реальная отправка идёт отдельным сообщением
+    после согласия клиента (см. smmbot_webhook).
     """
     async with AsyncSessionFactory() as session:
         user = await get_or_create_ig_user(session, client_id, client_name)
         user_id = user.id
         company_id = user.company_id
+        await _ensure_sendpulse_contact_id(session, user_id, contact_id)
+
+        # Телефон, присланный текстом — быстрая ветка без AI. Раньше на
+        # /webhook/smmbot номер вообще никак не извлекался из текста: клиент
+        # писал номер, AI вежливо благодарил, но user.phone оставался пустым
+        # и агент не узнавал о лиде (п.4 ТЗ).
+        phone_in_msg = find_phone_in_text(user_message) if not user.phone else None
+        if phone_in_msg:
+            session.add(ClientConversation(
+                user_id=user_id, property_id=None, role="user",
+                message=user_message,
+            ))
+            await session.commit()
+            reply_text = await _handle_phone_submission(session, user, phone_in_msg)
+            session.add(ClientConversation(
+                user_id=user_id, property_id=None, role="assistant",
+                message=reply_text,
+            ))
+            await session.commit()
+            logger.info("smmbot_phone_captured", client=client_id, user_id=user_id)
+            return reply_text, []
 
         history_rows = (
             await session.execute(
@@ -1311,6 +1476,21 @@ async def _smmbot_generate_reply(client_id: int, user_message: str,
     # их всё же вставила — вырезаем, клиент их видеть не должен.
     reply = clean_ai_reply(raw_reply)
 
+    # Объекты, которые реально были в этом ответе — тем же поиском, что
+    # кормил модель. Раньше на /webhook/smmbot вопрос "показать фото?"
+    # держался ЦЕЛИКОМ на промпте: модель не всегда его задавала, и клиент
+    # не понимал, что фото вообще можно посмотреть (п.2 ТЗ).
+    pending_ids: list[int] = []
+    async with AsyncSessionFactory() as session:
+        pending_ids = await _candidate_property_ids(
+            session, company_id, user_message, history
+        )
+
+    if pending_ids and mentions_property(reply) and not asks_about_photos(reply):
+        reply = f"{reply}\nRasmlarini ko'rasizmi?"
+    elif not mentions_property(reply):
+        pending_ids = []
+
     async with AsyncSessionFactory() as session:
         session.add(ClientConversation(
             user_id=user_id, property_id=None, role="assistant", message=reply,
@@ -1327,7 +1507,16 @@ async def _smmbot_generate_reply(client_id: int, user_message: str,
     ]
     asyncio.create_task(_qualify_in_background(user_id, history_for_qualify))
 
-    return reply
+    # Клиент уже оставил номер раньше и сейчас явно просит агента/звонок —
+    # лид уходит агенту сразу, не дожидаясь порога qualification_score.
+    if _AGENT_CONNECT_RE.search(user_message):
+        async with AsyncSessionFactory() as session:
+            fresh_user = await session.get(User, user_id)
+            has_phone = bool(fresh_user and fresh_user.phone)
+        if has_phone:
+            asyncio.create_task(_notify_agent_with_profile(user_id))
+
+    return reply, pending_ids
 
 
 # BotManager сохраняем при старте, чтобы уметь писать агентам в Telegram

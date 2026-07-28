@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # 0 = не проверять (принимаем любой канал).
     SALEBOT_INSTAGRAM_CLIENT_TYPE: int = 6
 
+    # SendPulse API (OAuth client_credentials) — проактивная отправка
+    # сообщений/фото контактам Instagram в обход синхронного /webhook/smmbot.
+    # Значения задаются в Railway Variables, в репозитории не хранятся.
+    SENDPULSE_API_ID: str = ""
+    SENDPULSE_API_SECRET: str = ""
+    SENDPULSE_BOT_ID: str = ""
+
     @field_validator("DATABASE_URL")
     @classmethod
     def validate_db_url(cls, v: str) -> str:

@@ -33,18 +33,28 @@ def is_instagram_client(user) -> bool:
 
 async def send_to_client(bot: Bot, user, text: str,
                          buttons: list[str] | None = None,
-                         reply_markup=None, parse_mode: str | None = None) -> bool:
+                         reply_markup=None, parse_mode: str | None = None,
+                         sendpulse_contact_id: str | None = None) -> bool:
     """
     Шлёт сообщение клиенту в его канал.
 
-    buttons — подписи кнопок для Instagram; reply_markup — готовая
-    инлайн-клавиатура для Telegram. Каждый канал берёт своё.
+    sendpulse_contact_id — оригинальный SendPulse contact_id клиента
+    (ClientProfile.sendpulse_contact_id), обязателен для Instagram-веток:
+    user.telegram_user_id для них — необратимый хеш этого ID (см.
+    instagram_bridge.smmbot_webhook), восстановить его нельзя.
+    Salebot (send_salebot_message) больше не вызывается — тот канал
+    отключён, оставлен только как мёртвый код на /webhook/instagram.
+
+    buttons сейчас не используется для Instagram: SendPulse
+    /instagram/contacts/send поддерживает только text/image, без кнопок.
+    reply_markup — инлайн-клавиатура для Telegram.
     """
     if is_instagram_client(user):
-        from src.services.instagram_bridge import send_salebot_message
-        return await send_salebot_message(
-            abs(user.telegram_user_id), text=text, buttons=buttons
-        )
+        if not sendpulse_contact_id:
+            logger.warning("send_to_client_no_sendpulse_contact", user_id=user.id)
+            return False
+        from src.services.sendpulse_client import send_sendpulse_message
+        return await send_sendpulse_message(sendpulse_contact_id, text)
 
     kwargs = {}
     if reply_markup is not None:
@@ -188,13 +198,13 @@ async def job_send_follow_ups(bot: Bot) -> None:
                         builder.button(text=labels[1], callback_data="followup:found")
                         builder.adjust(2)
 
-                    # В Instagram уйдут те же подписи, но reply-кнопками
-                    # Salebot; ответ на них принимает
-                    # /webhook/instagram/followup.
+                    # В Instagram кнопок нет (SendPulse API их не поддерживает
+                    # для этого типа сообщения) — уйдёт только текст.
                     sent = await send_to_client(
                         bot, user, msg,
                         buttons=labels,
                         reply_markup=builder.as_markup(),
+                        sendpulse_contact_id=profile.sendpulse_contact_id,
                     )
                     logger.info("follow_up_sent", user_id=user.id, day=count,
                                 channel="instagram" if is_instagram_client(user)
@@ -284,7 +294,19 @@ async def job_send_property_alerts(bot: Bot) -> None:
                 if is_instagram_client(user):
                     # В Instagram карточек нет — короткий текстовый список,
                     # фото клиент попросит сам (как в обычном диалоге).
-                    from src.services.instagram_bridge import send_salebot_message
+                    from src.db.models import ClientProfile
+                    from src.services.sendpulse_client import send_sendpulse_message
+
+                    profile = (
+                        await session.execute(
+                            select(ClientProfile).where(ClientProfile.user_id == user.id)
+                        )
+                    ).scalar_one_or_none()
+                    contact_id = profile.sendpulse_contact_id if profile else None
+                    if not contact_id:
+                        logger.warning("alert_no_sendpulse_contact", user_id=user.id)
+                        continue
+
                     lines = ["Yangi mos variantlar:"]
                     for prop in props:
                         price = f"{float(prop.price_usd):,.0f}".replace(",", " ")
@@ -292,11 +314,7 @@ async def job_send_property_alerts(bot: Bot) -> None:
                             f"{prop.location_district}, {prop.rooms} xona, ${price}"
                         )
                     lines.append("Rasmlarini ko'rasizmi?")
-                    await send_salebot_message(
-                        abs(user.telegram_user_id),
-                        text="\n".join(lines),
-                        buttons=["Ha", "Yo'q"],
-                    )
+                    await send_sendpulse_message(contact_id, "\n".join(lines))
                 else:
                     await bot.send_message(
                         user.telegram_user_id,

@@ -319,6 +319,11 @@ class ClientProfile(Base):
     last_contact_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     follow_up_count: Mapped[int] = mapped_column(Integer, default=0)
     unsubscribed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Оригинальный SendPulse contact_id (hex ObjectId). users.telegram_user_id
+    # для Instagram-клиентов — это -abs(hash(contact_id)) и обратно не
+    # разворачивается, поэтому джобам планировщика (follow-up, property
+    # alerts) для проактивной отправки через SendPulse API нужен сам ID.
+    sendpulse_contact_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
