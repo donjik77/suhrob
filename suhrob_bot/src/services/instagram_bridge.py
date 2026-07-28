@@ -442,7 +442,16 @@ async def _ensure_sendpulse_contact_id(session, user_id: int, contact_id: str) -
             profile.sendpulse_contact_id = contact_id
             await session.commit()
     else:
-        session.add(ClientProfile(user_id=user_id, sendpulse_contact_id=contact_id))
+        # Промокод фиксируем СРАЗУ, при создании профиля — не ждём, пока
+        # модель сама его придумает и потом сама же извлечёт обратно
+        # (qualify_client). Так код гарантированно один на user_id и не
+        # теряется, даже если извлечение из диалога промахнётся.
+        notes = ai_service.merge_profile_notes(
+            None, {"promo_code": ai_service.generate_promo_code(user_id)}
+        )
+        session.add(ClientProfile(
+            user_id=user_id, sendpulse_contact_id=contact_id, notes=notes,
+        ))
         await session.commit()
 
 
@@ -1389,7 +1398,13 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
         logger.info("smmbot_empty_message", client=client_id)
         return web.json_response({"reply": ""})
 
-    logger.info("smmbot_message_in", client=client_id, text=user_message[:100])
+    # raw_id — сырой contact_id от SendPulse, ДО хеширования в client_id.
+    # Логируем отдельно: если у одного и того же реального клиента при
+    # "новом диалоге" в Instagram raw_id меняется — это SendPulse выдаёт
+    # новый contact_id/сессию, и наш user (а с ним имя, промокод, история)
+    # неизбежно "теряется", т.к. это архитектурно другой клиент для нас.
+    logger.info("smmbot_message_in", client=client_id, raw_id=raw_id,
+                text=user_message[:100])
 
     # Клиент согласился посмотреть фото по ранее предложенным вариантам.
     # Проверяем ДО AI — это ответ на наш предыдущий вопрос, не новый запрос.

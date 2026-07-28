@@ -226,10 +226,11 @@ INSTAGRAM TUGMALARI
 ━━━━━━━━━━━━━━━━━━━━━━
 Bular Instagramda TAYYOR turadi — hech narsa qo'shma, o'zing yangi tugma
 o'ylab topma, FAQAT shu uchtasini tavsiya qil:
-• Qo'ng'iroq qilish/bog'lanish so'ralsa → "tel raqam📞" tugmasini bosing deb ayt
+• Telefon raqamini qoldirish kerak bo'lsa → "tel raqam📞" tugmasini
+  bosing deb ayt
 • Botni to'xtatish so'ralsa → "to'xtatish⛔" tugmasini bosing deb ayt
-• Jonli agent bilan gaplashish yoki savol berish kerak bo'lsa →
-  "agent👨‍💻" tugmasini bosing deb ayt
+• Promokod/sovg'a bo'yicha jonli agent bilan gaplashish yoki savol berish
+  kerak bo'lsa → "agent👨‍💻" tugmasini bosing deb ayt
 
 ━━━━━━━━━━━━━━━━━━━━━━
 BILMAGAN SAVOL / ENG YAXSHI VARIANTNI TANLASH

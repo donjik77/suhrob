@@ -636,6 +636,20 @@ async def build_properties_context(
 _NOTES_FIELDS = ("client_name", "client_gender", "promo_code")
 
 
+def generate_promo_code(user_id: int) -> str:
+    """
+    Детерминированный промокод по user_id — не полагаемся на то, что LLM
+    сама придумает код и потом сама же извлечёт его обратно (qualify_client
+    на втором проходе). Один user_id -> всегда один и тот же код, разные
+    user_id -> разные коды. Сохраняется один раз при создании профиля,
+    дальше модель только ЧИТАЕТ его из client_profile, не изобретает.
+    """
+    import hashlib
+    digest = hashlib.md5(f"suhrob-promo-{user_id}".encode()).hexdigest()
+    code = str(int(digest[:8], 16))[-4:].zfill(4)
+    return f"SUHROB-{code}"
+
+
 def unpack_profile_notes(notes: str | None) -> dict:
     """notes -> {summary, client_name, client_gender, promo_code}."""
     empty = {"summary": "", "client_name": None,
