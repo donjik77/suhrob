@@ -1408,11 +1408,13 @@ async def smmbot_webhook(request: web.Request) -> web.Response:
 
     # Клиент согласился посмотреть фото по ранее предложенным вариантам.
     # Проверяем ДО AI — это ответ на наш предыдущий вопрос, не новый запрос.
-    # Без этой ветки на боевом /webhook/smmbot фото не уходили НИКОГДА: тут
-    # раньше не было ничего, кроме текстового reply.
-    pending = _SMMBOT_PENDING_PHOTOS.get(client_id)
+    # ВАЖНО: .pop(), а не .get() — предложение фото живёт РОВНО ОДИН ход.
+    # Раньше был .get(), pending не снимался, если клиент не ответил "ha" —
+    # висел в памяти бессрочно и ЛЮБОЕ следующее сообщение с "ha"/"xa"
+    # где угодно в тексте (даже не по теме) ошибочно триггерило отправку
+    # старого, уже неактуального объекта.
+    pending = _SMMBOT_PENDING_PHOTOS.pop(client_id, None)
     if pending and wants_photos(user_message):
-        _SMMBOT_PENDING_PHOTOS.pop(client_id, None)
         try:
             async with AsyncSessionFactory() as session:
                 user = await get_or_create_ig_user(session, client_id, client_name)
